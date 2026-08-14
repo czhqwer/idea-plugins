@@ -343,7 +343,9 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private fun editorText(editor: EditorEx): String = editor.document.text
 
     private fun setEditorText(editor: EditorEx, text: String) {
-        editor.document.setText(text)
+        ApplicationManager.getApplication().runWriteAction {
+            editor.document.setText(text)
+        }
         editor.caretModel.moveToOffset(0)
     }
 
