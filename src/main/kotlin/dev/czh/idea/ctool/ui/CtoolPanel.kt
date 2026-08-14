@@ -1,7 +1,6 @@
 package dev.czh.idea.ctool.ui
 
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.ide.CopyPasteManager
@@ -9,15 +8,14 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.IconLoader
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.ex.EditorEx
+import com.intellij.openapi.editor.event.DocumentAdapter
+import com.intellij.openapi.editor.event.DocumentEvent as EditorDocumentEvent
 import com.intellij.openapi.editor.highlighter.EditorHighlighterFactory
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.ui.Messages
-import com.intellij.ui.ColoredListCellRenderer
 import com.intellij.ui.JBColor
 import com.intellij.ui.JBSplitter
-import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBLabel
-import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
@@ -47,23 +45,18 @@ import javax.swing.JPanel
 import javax.swing.JRadioButton
 import javax.swing.JSeparator
 import javax.swing.KeyStroke
-import javax.swing.ListSelectionModel
 import javax.swing.SwingUtilities
-import javax.swing.border.Border
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
-import javax.swing.event.ListSelectionEvent
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.editor.Editor
-import com.intellij.openapi.fileEditor.FileEditorManager
 
 class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
     private val borderColor = JBColor(Color(0xD9DEE7), Color(0x454B55))
     private val accentColor = JBColor(Color(0x2563EB), Color(0x5794FF))
     private val searchField = JBTextField()
     private val categoryBar = JPanel(FlowLayout(FlowLayout.LEFT, 3, 0))
+    private val toolStrip = JPanel(FlowLayout(FlowLayout.LEFT, 3, 0))
     private val toolCountLabel = JBLabel()
-    private val toolList = JBList<ToolDefinition>()
     private val operationStrip = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
     private val parameterButton = JButton("参数…")
     private val parameterHint = JBLabel()
@@ -126,11 +119,26 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
 
         categoryBar.isOpaque = false
         buildCategoryButtons()
-        val categories = JPanel(BorderLayout(0, 5)).apply { isOpaque = false }
-        categories.add(top, BorderLayout.NORTH)
-        categories.add(categoryBar, BorderLayout.CENTER)
-        categories.add(JSeparator(), BorderLayout.SOUTH)
-        add(categories, BorderLayout.NORTH)
+        toolStrip.isOpaque = false
+        val toolPicker = JPanel(BorderLayout(8, 0)).apply { isOpaque = false }
+        toolPicker.add(JBLabel("工具"), BorderLayout.WEST)
+        toolPicker.add(JBScrollPane(toolStrip).apply {
+            border = JBUI.Borders.empty()
+            horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
+            verticalScrollBarPolicy = JBScrollPane.VERTICAL_SCROLLBAR_NEVER
+            preferredSize = Dimension(0, 32)
+        }, BorderLayout.CENTER)
+        toolPicker.add(toolCountLabel, BorderLayout.EAST)
+
+        val navigation = JPanel(BorderLayout(0, 5)).apply { isOpaque = false }
+        navigation.add(top, BorderLayout.NORTH)
+        navigation.add(categoryBar, BorderLayout.CENTER)
+        navigation.add(toolPicker, BorderLayout.SOUTH)
+
+        val header = JPanel(BorderLayout(0, 5)).apply { isOpaque = false }
+        header.add(navigation, BorderLayout.NORTH)
+        header.add(JSeparator(), BorderLayout.SOUTH)
+        add(header, BorderLayout.NORTH)
     }
 
     private fun buildCategoryButtons() {
@@ -165,48 +173,13 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     }
 
     private fun buildBody() {
-        val sidebar = JPanel(BorderLayout(0, 8)).apply {
-            preferredSize = Dimension(224, 0)
-            minimumSize = Dimension(224, 0)
-            maximumSize = Dimension(224, Int.MAX_VALUE)
-            border = JBUI.Borders.empty(8, 0, 0, 10)
-        }
-        val libraryHeader = JPanel(BorderLayout()).apply { isOpaque = false }
-        val libraryTitle = JBLabel("工具库").apply { font = font.deriveFont(Font.BOLD, 13f) }
-        libraryHeader.add(libraryTitle, BorderLayout.WEST)
-        libraryHeader.add(toolCountLabel, BorderLayout.EAST)
-        sidebar.add(libraryHeader, BorderLayout.NORTH)
-
-        toolList.selectionMode = ListSelectionModel.SINGLE_SELECTION
-        toolList.cellRenderer = object : ColoredListCellRenderer<ToolDefinition>() {
-            override fun customizeCellRenderer(
-                list: javax.swing.JList<out ToolDefinition>,
-                value: ToolDefinition,
-                index: Int,
-                selected: Boolean,
-                hasFocus: Boolean,
-            ) {
-                val favorite = value.id in devDockSettings.favoriteToolIds
-                append(if (favorite) "★ " else "  ", if (favorite) SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES else SimpleTextAttributes.GRAYED_ATTRIBUTES)
-                append(value.name)
-                append("  ${value.category}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
-            }
-        }
-        toolList.emptyText.text = "没有匹配的工具"
-        toolList.addListSelectionListener { event: ListSelectionEvent ->
-            if (!event.valueIsAdjusting) toolList.selectedValue?.let(::selectTool)
-        }
-        sidebar.add(JBScrollPane(toolList).apply { border = BorderFactory.createLineBorder(borderColor) }, BorderLayout.CENTER)
-
         val main = JPanel(BorderLayout(0, 8)).apply { border = JBUI.Borders.empty(8, 0, 0, 0) }
-        main.add(buildToolHeader(), BorderLayout.NORTH)
+        val topControls = JPanel(BorderLayout(0, 6)).apply { isOpaque = false }
+        topControls.add(buildToolHeader(), BorderLayout.NORTH)
+        topControls.add(buildActionBar(), BorderLayout.SOUTH)
+        main.add(topControls, BorderLayout.NORTH)
         main.add(buildWorkspace(), BorderLayout.CENTER)
-        main.add(buildActionBar(), BorderLayout.SOUTH)
-
-        val body = JPanel(BorderLayout(0, 0)).apply { isOpaque = false }
-        body.add(sidebar, BorderLayout.WEST)
-        body.add(main, BorderLayout.CENTER)
-        add(body, BorderLayout.CENTER)
+        add(main, BorderLayout.CENTER)
     }
 
     private fun buildToolHeader(): JComponent {
@@ -266,9 +239,8 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
 
     private fun buildInputCard(): JComponent {
         val card = cardPanel()
-        val header = cardHeader("输入", "支持直接粘贴，也可以读取当前编辑器选区")
+        val header = cardHeader("输入", "支持直接粘贴代码或文本")
         val actions = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply { isOpaque = false }
-        actions.add(quietButton("读取选区") { readEditorSelection() })
         actions.add(quietButton("选择文件") { chooseFile() })
         header.add(actions, BorderLayout.EAST)
         card.add(header, BorderLayout.NORTH)
@@ -289,7 +261,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
 
     private fun buildOutputCard(): JComponent {
         val card = cardPanel()
-        card.add(cardHeader("结果", "可复制到剪贴板，或直接替换编辑器选区"), BorderLayout.NORTH)
+        card.add(cardHeader("结果", "可复制到剪贴板"), BorderLayout.NORTH)
         outputEditor = createCodeEditor(true)
         card.add(outputEditor.component, BorderLayout.CENTER)
         imageLabel.horizontalAlignment = JBLabel.CENTER
@@ -312,7 +284,6 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         executeButton.addActionListener { execute() }
         left.add(executeButton)
         left.add(quietButton("复制结果") { copyResult() })
-        left.add(quietButton("替换选区") { replaceEditorSelection() })
         left.add(quietButton("清空") { clearWorkspace() })
         bar.add(left, BorderLayout.WEST)
         statusLabel.foreground = UIUtil.getContextHelpForeground()
@@ -337,6 +308,11 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         editor.settings.isIndentGuidesShown = true
         editor.settings.isCaretRowShown = !readOnly
         editor.component.border = BorderFactory.createLineBorder(borderColor)
+        document.addDocumentListener(object : DocumentAdapter() {
+            override fun documentChanged(event: EditorDocumentEvent) {
+                SwingUtilities.invokeLater { updateJsonFolding(editor) }
+            }
+        }, this)
         return editor
     }
 
@@ -376,6 +352,50 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         if (::diffEditor.isInitialized) {
             diffEditor.highlighter = factory.createEditorHighlighter(project, fileType)
         }
+        updateJsonFolding(inputEditor)
+        updateJsonFolding(outputEditor)
+        if (::diffEditor.isInitialized) updateJsonFolding(diffEditor)
+    }
+
+    private fun updateJsonFolding(editor: EditorEx) {
+        val foldingModel = editor.foldingModel
+        val ranges = if (currentTool.id == "json") jsonFoldRanges(editor.document.text) else emptyList()
+        foldingModel.runBatchFoldingOperation {
+            foldingModel.allFoldRegions.toList().forEach(foldingModel::removeFoldRegion)
+            ranges.forEach { (start, end) ->
+                foldingModel.addFoldRegion(start, end, "…")?.setExpanded(true)
+            }
+        }
+    }
+
+    private fun jsonFoldRanges(text: String): List<Pair<Int, Int>> {
+        val stack = ArrayDeque<Pair<Char, Int>>()
+        val ranges = mutableListOf<Pair<Int, Int>>()
+        var inString = false
+        var escaped = false
+
+        text.forEachIndexed { index, char ->
+            if (inString) {
+                when {
+                    escaped -> escaped = false
+                    char == '\\' -> escaped = true
+                    char == '"' -> inString = false
+                }
+                return@forEachIndexed
+            }
+            when (char) {
+                '"' -> inString = true
+                '{', '[' -> stack.addLast(char to index)
+                '}', ']' -> {
+                    val expected = if (char == '}') '{' else '['
+                    val opening = stack.removeLastOrNull()
+                    if (opening?.first == expected && text.substring(opening.second, index + 1).contains('\n')) {
+                        ranges += opening.second to index + 1
+                    }
+                }
+            }
+        }
+        return ranges.sortedBy { it.first }
     }
 
     private fun cardHeader(title: String, hint: String): JPanel {
@@ -427,10 +447,32 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
                 .joinToString(" ").lowercase()
             categoryMatch && (query.isBlank() || haystack.contains(query))
         }
-        toolList.setListData(allVisibleTools.toTypedArray())
+        toolStrip.removeAll()
+        allVisibleTools.forEach { tool ->
+            val button = JButton(tool.name).apply {
+                isFocusable = false
+                isContentAreaFilled = true
+                border = JBUI.Borders.empty(4, 9)
+                toolTipText = "${tool.category} · ${tool.operations.joinToString(" / ")}"
+                putClientProperty("devdock.toolId", tool.id)
+                addActionListener { selectTool(tool) }
+            }
+            toolStrip.add(button)
+        }
         toolCountLabel.text = "${allVisibleTools.size} / ${ToolCatalog.all.size}"
-        val index = allVisibleTools.indexOfFirst { it.id == currentTool.id }
-        if (index >= 0) toolList.selectedIndex = index
+        updateToolStripSelection()
+        toolStrip.revalidate()
+        toolStrip.repaint()
+    }
+
+    private fun updateToolStripSelection() {
+        toolStrip.components.forEach { component ->
+            val button = component as? JButton ?: return@forEach
+            val selected = button.getClientProperty("devdock.toolId") == currentTool.id
+            button.background = if (selected) JBColor(Color(0xE7F0FF), Color(0x244A7B)) else UIUtil.getPanelBackground()
+            button.foreground = if (selected) accentColor else UIUtil.getLabelForeground()
+            button.font = button.font.deriveFont(if (selected) Font.BOLD else Font.PLAIN)
+        }
     }
 
     private fun selectTool(tool: ToolDefinition) {
@@ -450,6 +492,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         currentResult = ToolResult()
         selectedFile = null
         updateFavoriteButton()
+        updateToolStripSelection()
         updateEditorHighlighters()
         setStatus(if (tool.network) "此工具需要网络" else "准备就绪")
         revalidate()
@@ -458,13 +501,6 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
 
     private fun updateFavoriteButton() {
         favoriteButton.text = if (currentTool.id in devDockSettings.favoriteToolIds) "★ 已收藏" else "☆ 收藏"
-    }
-
-    private fun readEditorSelection() {
-        currentEditor()?.selectionModel?.selectedText?.let {
-            setEditorText(inputEditor, it)
-            setStatus("已读取编辑器选区")
-        } ?: setStatus("当前没有编辑器选区", true)
     }
 
     private fun chooseFile() {
@@ -553,19 +589,6 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         setStatus("结果已复制")
     }
 
-    private fun replaceEditorSelection() {
-        val editor = currentEditor() ?: run { setStatus("没有当前编辑器", true); return }
-        val selectionModel = editor.selectionModel
-        if (!selectionModel.hasSelection()) {
-            setStatus("当前没有编辑器选区", true)
-            return
-        }
-        WriteCommandAction.runWriteCommandAction(project) {
-            editor.document.replaceString(selectionModel.selectionStart, selectionModel.selectionEnd, currentResult.text)
-        }
-        setStatus("已替换编辑器选区")
-    }
-
     private fun clearWorkspace() {
         setEditorText(inputEditor, "")
         setEditorText(diffEditor, "")
@@ -575,14 +598,11 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         setStatus("工作区已清空")
     }
 
-    private fun currentEditor(): Editor? = FileEditorManager.getInstance(project).selectedTextEditor
-
     private fun toggleFavorite() {
         val favorites = devDockSettings.favoriteToolIds.toMutableList()
         if (currentTool.id in favorites) favorites.remove(currentTool.id) else favorites.add(currentTool.id)
         devDockSettings.favoriteToolIds = favorites
         updateFavoriteButton()
-        toolList.repaint()
         if (activeCategory == "常用") refreshToolList()
         setStatus(if (currentTool.id in favorites) "已加入常用工具" else "已移出常用工具")
     }

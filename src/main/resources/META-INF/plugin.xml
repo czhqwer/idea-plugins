@@ -1,7 +1,6 @@
 <idea-plugin>
     <id>dev.czh.idea.devdock</id>
     <name>DevDock</name>
-    <icon>/icons/devdock.svg</icon>
     <vendor email="">czh</vendor>
     <description><![CDATA[
         <p>面向日常开发的原生 IntelliJ IDEA 工具箱，集中处理编码、转换、校验与调试任务。</p>
@@ -11,7 +10,8 @@
     <depends>com.intellij.modules.platform</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow id="DevDock" anchor="right" factoryClass="dev.czh.idea.ctool.ui.DevDockToolWindowFactory" />
+        <toolWindow id="DevDock" anchor="right" icon="/icons/devdock.svg"
+                    factoryClass="dev.czh.idea.ctool.ui.DevDockToolWindowFactory" />
     </extensions>
 
     <actions>
