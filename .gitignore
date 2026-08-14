@@ -1,0 +1,24 @@
+.gradle/
+.kotlin/
+.intellijPlatform/
+build/
+out/
+.idea/
+*.iml
+local.properties
+
+# IntelliJ IDEA local metadata
+*.ipr
+*.iws
+
+# OS and editor artifacts
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Local logs and environment files
+*.log
+.env
+.env.*
+!.env.example
