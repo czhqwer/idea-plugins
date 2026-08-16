@@ -32,17 +32,15 @@ import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
-import java.awt.Insets
 import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
 import java.awt.datatransfer.StringSelection
 import java.nio.file.Path
 import javax.swing.BorderFactory
-import javax.swing.ButtonGroup
+import javax.swing.JComboBox
 import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
-import javax.swing.JRadioButton
 import javax.swing.JSeparator
 import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
@@ -57,7 +55,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private val categoryBar = JPanel(FlowLayout(FlowLayout.LEFT, 3, 0))
     private val toolStrip = JPanel(FlowLayout(FlowLayout.LEFT, 3, 0))
     private val toolCountLabel = JBLabel()
-    private val operationStrip = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
+    private val operationBox = JComboBox<String>()
     private val parameterButton = JButton("参数…")
     private val parameterHint = JBLabel()
     private var selectedOperation = ""
@@ -68,7 +66,6 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private lateinit var diffCard: JComponent
     private val imageLabel = JBLabel()
     private val titleLabel = JBLabel()
-    private val subtitleLabel = JBLabel()
     private val networkLabel = JBLabel()
     private val statusLabel = JBLabel("准备就绪")
     private val favoriteButton = JButton()
@@ -184,12 +181,26 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
 
     private fun buildToolHeader(): JComponent {
         val header = JPanel(BorderLayout(8, 0)).apply { isOpaque = false }
-        val text = JPanel(GridBagLayout()).apply { isOpaque = false }
+        val titleRow = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply { isOpaque = false }
         titleLabel.font = titleLabel.font.deriveFont(Font.BOLD, 18f)
-        subtitleLabel.foreground = UIUtil.getContextHelpForeground()
-        text.add(titleLabel, GridBagConstraints().apply { gridx = 0; gridy = 0; anchor = GridBagConstraints.WEST })
-        text.add(subtitleLabel, GridBagConstraints().apply { gridx = 0; gridy = 1; anchor = GridBagConstraints.WEST; insets = Insets(3, 0, 0, 0) })
-        header.add(text, BorderLayout.WEST)
+        titleRow.add(titleLabel)
+        titleRow.add(JBLabel("模式"))
+        operationBox.preferredSize = Dimension(170, 28)
+        operationBox.isFocusable = false
+        operationBox.addActionListener {
+            operationBox.selectedItem?.toString()?.takeIf(String::isNotBlank)?.let {
+                selectedOperation = it
+                updateEditorHighlighters()
+            }
+        }
+        titleRow.add(operationBox)
+        parameterButton.isFocusable = false
+        parameterButton.addActionListener { editParameters() }
+        parameterHint.foreground = UIUtil.getContextHelpForeground()
+        parameterHint.font = parameterHint.font.deriveFont(11f)
+        titleRow.add(parameterHint)
+        titleRow.add(parameterButton)
+        header.add(titleRow, BorderLayout.CENTER)
 
         val controls = JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply { isOpaque = false }
         networkLabel.foreground = JBColor(Color(0xA16207), Color(0xE9B949))
@@ -198,29 +209,6 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         favoriteButton.isFocusable = false
         controls.add(favoriteButton)
         header.add(controls, BorderLayout.EAST)
-
-        val modeRow = JPanel(BorderLayout(8, 0)).apply {
-            isOpaque = false
-            border = JBUI.Borders.emptyTop(8)
-        }
-        modeRow.add(JBLabel("模式"), BorderLayout.WEST)
-        modeRow.add(JBScrollPane(operationStrip).apply {
-            border = JBUI.Borders.empty()
-            horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
-            verticalScrollBarPolicy = JBScrollPane.VERTICAL_SCROLLBAR_NEVER
-            preferredSize = Dimension(0, 30)
-        }, BorderLayout.CENTER)
-        parameterButton.isFocusable = false
-        parameterButton.addActionListener { editParameters() }
-        parameterHint.foreground = UIUtil.getContextHelpForeground()
-        parameterHint.font = parameterHint.font.deriveFont(11f)
-        val parameterControls = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
-            isOpaque = false
-            add(parameterHint)
-            add(parameterButton)
-        }
-        modeRow.add(parameterControls, BorderLayout.EAST)
-        header.add(modeRow, BorderLayout.SOUTH)
         return header
     }
 
@@ -479,7 +467,6 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         currentTool = tool
         devDockSettings.lastToolId = tool.id
         titleLabel.text = tool.name
-        subtitleLabel.text = "${tool.category}  ·  ${tool.operations.joinToString(" / ")}" 
         networkLabel.text = if (tool.network) "需要网络" else ""
         setOperations(tool.operations)
         setEditorText(inputEditor, "")
@@ -517,26 +504,10 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     }
 
     private fun setOperations(operations: List<String>) {
-        operationStrip.removeAll()
-        val group = ButtonGroup()
-        operations.forEachIndexed { index, operation ->
-            val radio = JRadioButton(operation).apply {
-                isOpaque = false
-                isFocusable = false
-                addActionListener {
-                    selectedOperation = operation
-                    updateEditorHighlighters()
-                }
-            }
-            group.add(radio)
-            operationStrip.add(radio)
-            if (index == 0) {
-                radio.isSelected = true
-                selectedOperation = operation
-            }
-        }
-        operationStrip.revalidate()
-        operationStrip.repaint()
+        operationBox.removeAllItems()
+        operations.forEach(operationBox::addItem)
+        selectedOperation = operations.firstOrNull().orEmpty()
+        operationBox.selectedIndex = if (operations.isEmpty()) -1 else 0
         updateEditorHighlighters()
     }
 

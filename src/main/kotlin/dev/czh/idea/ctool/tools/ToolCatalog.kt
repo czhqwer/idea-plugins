@@ -15,7 +15,7 @@ object ToolCatalog {
         add(tool("rsa", "RSA", "加密", listOf("加密", "解密")))
         add(tool("sign", "RSA 签名", "加密", listOf("签名 MD5withRSA", "验证 MD5withRSA", "签名 SHA1withRSA", "验证 SHA1withRSA", "签名 SHA256withRSA", "验证 SHA256withRSA", "签名 SHA512withRSA", "验证 SHA512withRSA", "生成密钥对"), "rsa signature"))
         add(tool("base64", "Base64", "编码解码", listOf("编码", "解码"), "base64"))
-        add(tool("json", "JSON 工具", "编码解码", listOf("格式化", "校验", "压缩", "转义", "去除转义", "Unicode 转中文", "中文转 Unicode", "转 GET 参数", "JSONPath", "JSON 转 Java", "JSON 转 C#", "JSON 转 Go", "JSON 转 Dart", "JSON 转 CSV", "JSON 转表格", "JSON 转 Protobuf"), "json jsonpath csv table protobuf"))
+        add(tool("json", "JSON 工具", "编码解码", listOf("格式化", "校验", "压缩", "转义", "去除转义", "Unicode 转中文", "中文转 Unicode", "转 GET 参数", "JSONPath"), "json jsonpath"))
         add(tool("url", "URL 编码", "编码解码", listOf("编码", "解码"), "url uri"))
         add(tool("qrCode", "二维码", "生成", listOf("生成", "解析"), "qrcode qr", file = true))
         add(tool("barcode", "条形码", "生成", listOf("生成"), "barcode", file = true))

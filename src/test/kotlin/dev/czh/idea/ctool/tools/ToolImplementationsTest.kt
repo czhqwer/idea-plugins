@@ -20,10 +20,14 @@ class ToolImplementationsTest {
     @Test
     fun jsonConversionTools() {
         val json = "[{\"name\":\"Ada\",\"age\":36},{\"name\":\"Grace\",\"age\":37}]"
-        val csv = run("json", "JSON 转 CSV", json)
-        assertFalse(csv.isError)
-        assertTrue(csv.text.startsWith("name,age"))
         assertEquals("37", run("json", "JSONPath", json, "$.1.age").text)
+    }
+
+    @Test
+    fun jsonCompressionIsCompact() {
+        val result = run("json", "压缩", "{ \"name\": \"Ada\", \"items\": [1, 2] }")
+        assertFalse(result.isError)
+        assertEquals("{\"name\":\"Ada\",\"items\":[1,2]}", result.text)
     }
 
     @Test

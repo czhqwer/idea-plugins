@@ -83,6 +83,7 @@ import javax.imageio.ImageIO
 
 object ToolImplementations {
     private val gson = GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create()
+    private val compactGson = GsonBuilder().disableHtmlEscaping().create()
     private val inputFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 
     init {
@@ -180,17 +181,13 @@ object ToolImplementations {
         val root = JsonParser.parseString(request.input)
         return when {
             request.operation == "校验" -> ToolResult("JSON 有效")
-            request.operation == "压缩" -> ToolResult(gson.toJson(root))
+            request.operation == "压缩" -> ToolResult(compactGson.toJson(root))
             request.operation == "转义" -> ToolResult(gson.toJson(request.input))
             request.operation == "去除转义" -> ToolResult(gson.fromJson(request.input, String::class.java))
             request.operation == "Unicode 转中文" -> ToolResult(decodeUnicode(request.input))
             request.operation == "中文转 Unicode" -> ToolResult(encodeUnicode(request.input))
             request.operation == "转 GET 参数" -> ToolResult(jsonToQuery(root))
             request.operation == "JSONPath" -> ToolResult(jsonPath(root, request.secondaryInput.ifBlank { "$." }))
-            request.operation == "JSON 转 CSV" -> ToolResult(jsonToCsv(root))
-            request.operation == "JSON 转表格" -> ToolResult(jsonToTable(root))
-            request.operation == "JSON 转 Protobuf" -> ToolResult(jsonToProtobuf(root))
-            request.operation.startsWith("JSON 转") -> ToolResult(generateObjectCode(root, request.operation))
             else -> ToolResult(gson.toJson(root))
         }
     }
@@ -859,14 +856,6 @@ object ToolImplementations {
         }.trimEnd()
     }
 
-    private fun jsonToProtobuf(root: JsonElement): String {
-        val row = jsonRows(root).firstOrNull().orEmpty()
-        val body = row.entries.mapIndexed { index, (key, value) ->
-            "  ${protoType(value)} ${safeName(key)} = ${index + 1};"
-        }.joinToString("\n")
-        return "syntax = \"proto3\";\n\nmessage Root {\n$body\n}"
-    }
-
     private fun jsonToPhpArray(element: JsonElement): String = when {
         element.isJsonObject -> element.asJsonObject.entrySet().joinToString(",\n", "[\n", "\n]") { (key, value) -> "    ${gson.toJson(key)} => ${jsonToPhpArray(value)}" }
         element.isJsonArray -> element.asJsonArray.joinToString(", ", "[", "]", transform = ::jsonToPhpArray)
@@ -888,15 +877,6 @@ object ToolImplementations {
         element.asJsonPrimitive.isBoolean -> "b:${if (element.asBoolean) 1 else 0};"
         element.asJsonPrimitive.isNumber -> "d:${element.asString};"
         else -> "s:${element.asString.toByteArray(StandardCharsets.UTF_8).size}:\"${element.asString.replace("\"", "\\\"")}\";"
-    }
-
-    private fun protoType(value: JsonElement): String = when {
-        value.isJsonArray -> "repeated ${protoType(value.asJsonArray.asList().firstOrNull() ?: JsonPrimitive(""))}"
-        value.isJsonObject -> "google.protobuf.Struct"
-        value.isJsonNull -> "string"
-        value.asJsonPrimitive.isBoolean -> "bool"
-        value.asJsonPrimitive.isNumber -> if (value.asString.contains('.')) "double" else "int64"
-        else -> "string"
     }
 
     private fun jsonPath(root: JsonElement, path: String): String {
