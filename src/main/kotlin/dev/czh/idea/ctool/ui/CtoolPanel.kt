@@ -5,7 +5,6 @@ import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.IconLoader
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.event.DocumentAdapter
@@ -30,8 +29,6 @@ import java.awt.Color
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
-import java.awt.GridBagConstraints
-import java.awt.GridBagLayout
 import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
 import java.awt.datatransfer.StringSelection
@@ -79,7 +76,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
 
     init {
         background = UIUtil.getPanelBackground()
-        border = JBUI.Borders.empty(8)
+        border = JBUI.Borders.empty(6)
         buildHeader()
         buildBody()
         installSearch()
@@ -89,35 +86,16 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     }
 
     private fun buildHeader() {
-        val brand = JPanel(BorderLayout(8, 0)).apply {
-            isOpaque = false
-            border = JBUI.Borders.empty(0, 2, 4, 0)
-        }
-        val logo = JBLabel(IconLoader.getIcon("/icons/devdock.svg", DevDockPanel::class.java))
-        brand.add(logo, BorderLayout.WEST)
-
-        val brandText = JPanel(GridBagLayout()).apply { isOpaque = false }
-        val brandName = JBLabel("DevDock").apply {
-            font = font.deriveFont(Font.BOLD, 16f)
-        }
-        val tagline = JBLabel("开发者常用工具").apply {
-            foreground = UIUtil.getContextHelpForeground()
-            font = font.deriveFont(11f)
-        }
-        brandText.add(brandName, GridBagConstraints().apply { gridx = 0; gridy = 0; anchor = GridBagConstraints.WEST })
-        brandText.add(tagline, GridBagConstraints().apply { gridx = 0; gridy = 1; anchor = GridBagConstraints.WEST })
-        brand.add(brandText, BorderLayout.CENTER)
-
-        val top = JPanel(BorderLayout(12, 0)).apply { isOpaque = false }
-        top.add(brand, BorderLayout.WEST)
-        searchField.emptyText.text = "搜索工具、功能或关键词"
-        searchField.preferredSize = Dimension(240, 30)
-        top.add(searchField, BorderLayout.EAST)
-
+        val top = JPanel(BorderLayout(8, 0)).apply { isOpaque = false }
         categoryBar.isOpaque = false
         buildCategoryButtons()
+        top.add(categoryBar, BorderLayout.CENTER)
+        searchField.emptyText.text = "搜索工具、功能或关键词"
+        searchField.preferredSize = Dimension(230, 28)
+        top.add(searchField, BorderLayout.EAST)
+
         toolStrip.isOpaque = false
-        val toolPicker = JPanel(BorderLayout(8, 0)).apply { isOpaque = false }
+        val toolPicker = JPanel(BorderLayout(6, 0)).apply { isOpaque = false }
         toolPicker.add(JBLabel("工具"), BorderLayout.WEST)
         toolPicker.add(JBScrollPane(toolStrip).apply {
             border = JBUI.Borders.empty()
@@ -127,12 +105,11 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         }, BorderLayout.CENTER)
         toolPicker.add(toolCountLabel, BorderLayout.EAST)
 
-        val navigation = JPanel(BorderLayout(0, 5)).apply { isOpaque = false }
+        val navigation = JPanel(BorderLayout(0, 3)).apply { isOpaque = false }
         navigation.add(top, BorderLayout.NORTH)
-        navigation.add(categoryBar, BorderLayout.CENTER)
         navigation.add(toolPicker, BorderLayout.SOUTH)
 
-        val header = JPanel(BorderLayout(0, 5)).apply { isOpaque = false }
+        val header = JPanel(BorderLayout(0, 3)).apply { isOpaque = false }
         header.add(navigation, BorderLayout.NORTH)
         header.add(JSeparator(), BorderLayout.SOUTH)
         add(header, BorderLayout.NORTH)
