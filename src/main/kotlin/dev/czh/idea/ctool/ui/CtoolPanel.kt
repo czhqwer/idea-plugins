@@ -102,7 +102,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private val accentColor = JBColor(Color(0x2563EB), Color(0x5794FF))
     private val searchField = JBTextField()
     private val categoryBar = JPanel(WrapLayout(FlowLayout.LEFT, 3, 0))
-    private val toolStrip = JPanel(WrapLayout(FlowLayout.LEFT, 3, 0))
+    private val toolBox = JComboBox<String>()
     private val toolCountLabel = JBLabel()
     private val operationBox = JComboBox<String>()
     private val parameterButton = JButton("参数…")
@@ -127,6 +127,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private var currentTool: ToolDefinition = ToolCatalog.find(devDockSettings.lastToolId)
     private var currentResult = ToolResult()
     private var allVisibleTools: List<ToolDefinition> = ToolCatalog.all
+    private var updatingToolBox = false
 
     init {
         background = UIUtil.getPanelBackground()
@@ -149,11 +150,14 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         searchField.preferredSize = Dimension(230, 28)
         top.add(searchField, BorderLayout.EAST)
 
-        toolStrip.isOpaque = false
-        installWrapReflow(toolStrip)
+        toolBox.preferredSize = Dimension(260, 28)
+        toolBox.isFocusable = false
+        toolBox.addActionListener {
+            if (!updatingToolBox) allVisibleTools.getOrNull(toolBox.selectedIndex)?.let(::selectTool)
+        }
         val toolPicker = JPanel(BorderLayout(6, 0)).apply { isOpaque = false }
         toolPicker.add(JBLabel("工具"), BorderLayout.WEST)
-        toolPicker.add(toolStrip, BorderLayout.CENTER)
+        toolPicker.add(toolBox, BorderLayout.CENTER)
         toolPicker.add(toolCountLabel, BorderLayout.EAST)
 
         val navigation = JPanel(BorderLayout(0, 3)).apply { isOpaque = false }
@@ -204,6 +208,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         activeCategory = category
         updateCategoryButtons()
         refreshToolList()
+        allVisibleTools.firstOrNull()?.let(::selectTool)
     }
 
     private fun buildBody() {
@@ -473,31 +478,26 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
                 .joinToString(" ").lowercase()
             categoryMatch && (query.isBlank() || haystack.contains(query))
         }
-        toolStrip.removeAll()
-        allVisibleTools.forEach { tool ->
-            val button = JButton(tool.name).apply {
-                isFocusable = false
-                isContentAreaFilled = true
-                border = JBUI.Borders.empty(4, 9)
-                toolTipText = "${tool.category} · ${tool.operations.joinToString(" / ")}"
-                putClientProperty("devdock.toolId", tool.id)
-                addActionListener { selectTool(tool) }
-            }
-            toolStrip.add(button)
+        updatingToolBox = true
+        try {
+            toolBox.removeAllItems()
+            allVisibleTools.forEach { tool -> toolBox.addItem(tool.name) }
+            val selectedIndex = allVisibleTools.indexOfFirst { it.id == currentTool.id }
+            toolBox.selectedIndex = selectedIndex.takeIf { it >= 0 } ?: -1
+        } finally {
+            updatingToolBox = false
         }
         toolCountLabel.text = "${allVisibleTools.size} / ${ToolCatalog.all.size}"
-        updateToolStripSelection()
-        toolStrip.revalidate()
-        toolStrip.repaint()
+        toolBox.revalidate()
+        toolBox.repaint()
     }
 
-    private fun updateToolStripSelection() {
-        toolStrip.components.forEach { component ->
-            val button = component as? JButton ?: return@forEach
-            val selected = button.getClientProperty("devdock.toolId") == currentTool.id
-            button.background = if (selected) JBColor(Color(0xE7F0FF), Color(0x244A7B)) else UIUtil.getPanelBackground()
-            button.foreground = if (selected) accentColor else UIUtil.getLabelForeground()
-            button.font = button.font.deriveFont(if (selected) Font.BOLD else Font.PLAIN)
+    private fun updateToolSelector() {
+        val selectedIndex = allVisibleTools.indexOfFirst { it.id == currentTool.id }
+        if (selectedIndex >= 0 && toolBox.selectedIndex != selectedIndex) {
+            updatingToolBox = true
+            toolBox.selectedIndex = selectedIndex
+            updatingToolBox = false
         }
     }
 
@@ -518,7 +518,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         currentResult = ToolResult()
         selectedFile = null
         updateFavoriteButton()
-        updateToolStripSelection()
+        updateToolSelector()
         updateEditorHighlighters()
         setStatus(if (tool.network) "此工具需要网络" else "准备就绪")
         revalidate()
