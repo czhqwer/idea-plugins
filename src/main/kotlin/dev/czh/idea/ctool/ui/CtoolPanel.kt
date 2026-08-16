@@ -368,8 +368,10 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         workspaceContainer.removeAll()
         inputColumn.parent?.remove(inputColumn)
         outputCard.parent?.remove(outputCard)
+        inputCard.remove(inputEditor.component)
+        outputCard.remove(outputEditor.component)
+        jsonWorkspace.remove(inputEditor.component)
         if (currentTool.id == "json") {
-            inputEditor.component.parent?.remove(inputEditor.component)
             jsonWorkspace.add(inputEditor.component, BorderLayout.CENTER)
             workspaceContainer.add(jsonWorkspace, BorderLayout.CENTER)
             workspaceContainer.revalidate()
@@ -377,16 +379,16 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
             return
         }
         if (isCryptoTool(currentTool.id)) {
-            inputEditor.component.parent?.remove(inputEditor.component)
-            outputEditor.component.parent?.remove(outputEditor.component)
+            inputCard.add(inputEditor.component, BorderLayout.CENTER)
+            outputCard.add(outputEditor.component, BorderLayout.CENTER)
             configureCryptoWorkspace()
             workspaceContainer.add(cryptoWorkspace, BorderLayout.CENTER)
             workspaceContainer.revalidate()
             workspaceContainer.repaint()
             return
         }
-        jsonWorkspace.remove(inputEditor.component)
         inputCard.add(inputEditor.component, BorderLayout.CENTER)
+        outputCard.add(outputEditor.component, BorderLayout.CENTER)
         val workspace = JBSplitter(isVerticalWorkspace(currentTool), 0.5f).apply {
             firstComponent = inputColumn
             secondComponent = outputCard
