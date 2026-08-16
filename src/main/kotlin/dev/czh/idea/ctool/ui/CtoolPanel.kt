@@ -275,6 +275,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         }
         left.add(toolBox, BorderLayout.WEST)
         operationButtons.isOpaque = false
+        operationButtons.border = JBUI.Borders.empty(0)
         left.add(operationButtons, BorderLayout.CENTER)
         header.add(left, BorderLayout.CENTER)
 
@@ -659,7 +660,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private fun setOperations(operations: List<String>) {
         operationButtons.removeAll()
         operations.forEach { operation ->
-            operationButtons.add(iconButton(operationIcon(operation), operation) {
+            operationButtons.add(operationButton(operation) {
                 executeOperation(operation)
             })
         }
@@ -669,34 +670,11 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         updateEditorHighlighters()
     }
 
-    private fun operationIcon(operation: String): String = when {
-        operation.contains("JavaScript", ignoreCase = true) -> "JS"
-        operation.contains("TypeScript", ignoreCase = true) -> "TS"
-        operation.contains("HTML", ignoreCase = true) -> "<>"
-        operation.contains("GraphQL", ignoreCase = true) -> "GQ"
-        operation.contains("JSON", ignoreCase = true) -> "{}"
-        operation.contains("CSS", ignoreCase = true) -> "#"
-        operation.contains("YAML", ignoreCase = true) -> "Y"
-        operation.contains("XML", ignoreCase = true) -> "X"
-        operation.contains("加密") || operation.contains("签名") -> "↗"
-        operation.contains("解密") || operation.contains("验证") -> "✓"
-        operation.contains("生成") -> "+"
-        operation.contains("压缩") -> "−"
-        operation.contains("解压") -> "+"
-        operation.contains("编码") -> "↗"
-        operation.contains("解码") -> "↙"
-        operation.contains("查询") || operation.contains("搜索") -> "⌕"
-        operation.contains("解析") -> "⌁"
-        operation.contains("转换") -> "⇄"
-        operation.contains("替换") -> "↔"
-        operation.contains("匹配") -> ".*"
-        operation.contains("查找") -> "⌕"
-        operation.contains("过滤") -> "ƒ"
-        operation.contains("校验") || operation.contains("检查") -> "✓"
-        operation.contains("连接") -> "↔"
-        operation.contains("发送") -> "↗"
-        operation.length <= 2 -> operation
-        else -> operation.take(2)
+    private fun operationButton(operation: String, action: () -> Unit): JButton = FlatIconButton(operation).apply {
+        val textWidth = getFontMetrics(font).stringWidth(operation)
+        preferredSize = Dimension((textWidth + 18).coerceAtLeast(44), 28)
+        toolTipText = operation
+        addActionListener { action() }
     }
 
     private fun executeOperation(operation: String) {
