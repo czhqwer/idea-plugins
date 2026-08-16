@@ -11,7 +11,6 @@ import com.intellij.openapi.editor.event.DocumentAdapter
 import com.intellij.openapi.editor.event.DocumentEvent as EditorDocumentEvent
 import com.intellij.openapi.editor.highlighter.EditorHighlighterFactory
 import com.intellij.openapi.fileTypes.FileTypeManager
-import com.intellij.openapi.ui.Messages
 import com.intellij.ui.JBColor
 import com.intellij.ui.JBSplitter
 import com.intellij.ui.components.JBLabel
@@ -103,10 +102,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private val searchField = JBTextField()
     private val categoryBar = JPanel(WrapLayout(FlowLayout.LEFT, 3, 0))
     private val toolBox = JComboBox<String>()
-    private val toolCountLabel = JBLabel()
     private val operationBox = JComboBox<String>()
-    private val parameterButton = JButton("参数…")
-    private val parameterHint = JBLabel()
     private var selectedOperation = ""
     private lateinit var inputEditor: EditorEx
     private lateinit var diffEditor: EditorEx
@@ -116,13 +112,11 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private lateinit var workspaceContainer: JPanel
     private lateinit var outputCard: JComponent
     private val imageLabel = JBLabel()
-    private val titleLabel = JBLabel()
     private val networkLabel = JBLabel()
     private val statusLabel = JBLabel("准备就绪")
-    private val favoriteButton = JButton()
-    private val executeButton = JButton("运行  Ctrl+Enter")
+    private val favoriteButton = JButton("☆")
+    private val executeButton = JButton("▶")
     private var selectedFile: Path? = null
-    private var parameterText = ""
     private var activeCategory = "常用"
     private var currentTool: ToolDefinition = ToolCatalog.find(devDockSettings.lastToolId)
     private var currentResult = ToolResult()
@@ -150,22 +144,8 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         searchField.preferredSize = Dimension(230, 28)
         top.add(searchField, BorderLayout.EAST)
 
-        toolBox.preferredSize = Dimension(260, 28)
-        toolBox.isFocusable = false
-        toolBox.addActionListener {
-            if (!updatingToolBox) allVisibleTools.getOrNull(toolBox.selectedIndex)?.let(::selectTool)
-        }
-        val toolPicker = JPanel(BorderLayout(6, 0)).apply { isOpaque = false }
-        toolPicker.add(JBLabel("工具"), BorderLayout.WEST)
-        toolPicker.add(toolBox, BorderLayout.CENTER)
-        toolPicker.add(toolCountLabel, BorderLayout.EAST)
-
-        val navigation = JPanel(BorderLayout(0, 3)).apply { isOpaque = false }
-        navigation.add(top, BorderLayout.NORTH)
-        navigation.add(toolPicker, BorderLayout.SOUTH)
-
         val header = JPanel(BorderLayout(0, 3)).apply { isOpaque = false }
-        header.add(navigation, BorderLayout.NORTH)
+        header.add(top, BorderLayout.NORTH)
         header.add(JSeparator(), BorderLayout.SOUTH)
         add(header, BorderLayout.NORTH)
     }
@@ -220,8 +200,16 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
 
     private fun buildToolHeader(): JComponent {
         val header = JPanel(WrapLayout(FlowLayout.LEFT, 6, 0)).apply { isOpaque = false }
-        titleLabel.font = titleLabel.font.deriveFont(Font.BOLD, 18f)
-        header.add(titleLabel)
+        toolBox.preferredSize = Dimension(150, 32)
+        toolBox.isFocusable = false
+        toolBox.isOpaque = false
+        toolBox.border = JBUI.Borders.empty()
+        toolBox.font = toolBox.font.deriveFont(Font.BOLD, 18f)
+        toolBox.toolTipText = "切换工具"
+        toolBox.addActionListener {
+            if (!updatingToolBox) allVisibleTools.getOrNull(toolBox.selectedIndex)?.let(::selectTool)
+        }
+        header.add(toolBox)
         header.add(JBLabel("模式"))
         operationBox.preferredSize = Dimension(170, 28)
         operationBox.isFocusable = false
@@ -232,28 +220,24 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
             }
         }
         header.add(operationBox)
-        parameterButton.isFocusable = false
-        parameterButton.addActionListener { editParameters() }
-        parameterHint.foreground = UIUtil.getContextHelpForeground()
-        parameterHint.font = parameterHint.font.deriveFont(11f)
-        header.add(parameterHint)
-        header.add(parameterButton)
-
         executeButton.isFocusable = false
         executeButton.background = accentColor
         executeButton.foreground = Color.WHITE
         executeButton.isOpaque = true
-        executeButton.border = JBUI.Borders.empty(6, 14)
+        executeButton.border = JBUI.Borders.empty(5, 9)
+        executeButton.margin = JBUI.insets(3, 7)
+        executeButton.toolTipText = "运行（Ctrl+Enter）"
         executeButton.addActionListener { execute() }
         header.add(executeButton)
-        header.add(quietButton("复制结果") { copyResult() })
-        header.add(quietButton("清空") { clearWorkspace() })
+        header.add(iconButton("⧉", "复制结果") { copyResult() })
+        header.add(iconButton("×", "清空输入和结果") { clearWorkspace() })
 
         networkLabel.foreground = JBColor(Color(0xA16207), Color(0xE9B949))
         header.add(networkLabel)
         statusLabel.foreground = UIUtil.getContextHelpForeground()
         header.add(statusLabel)
-        favoriteButton.text = "☆ 收藏"
+        favoriteButton.preferredSize = Dimension(32, 28)
+        favoriteButton.margin = JBUI.insets(3)
         favoriteButton.addActionListener { toggleFavorite() }
         favoriteButton.isFocusable = false
         header.add(favoriteButton)
@@ -293,7 +277,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         val card = cardPanel()
         val header = cardHeader("输入", "支持直接粘贴代码或文本")
         val actions = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply { isOpaque = false }
-        actions.add(quietButton("选择文件") { chooseFile() })
+        actions.add(iconButton("↥", "选择文件") { chooseFile() })
         header.add(actions, BorderLayout.EAST)
         card.add(header, BorderLayout.NORTH)
         inputEditor = createCodeEditor(false)
@@ -441,9 +425,11 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         return header
     }
 
-    private fun quietButton(text: String, action: () -> Unit): JButton = JButton(text).apply {
+    private fun iconButton(icon: String, tooltip: String, action: () -> Unit): JButton = JButton(icon).apply {
         isFocusable = false
-        margin = JBUI.insets(3, 8)
+        preferredSize = Dimension(32, 28)
+        margin = JBUI.insets(3)
+        toolTipText = tooltip
         addActionListener { action() }
     }
 
@@ -487,7 +473,6 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         } finally {
             updatingToolBox = false
         }
-        toolCountLabel.text = "${allVisibleTools.size} / ${ToolCatalog.all.size}"
         toolBox.revalidate()
         toolBox.repaint()
     }
@@ -504,7 +489,6 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private fun selectTool(tool: ToolDefinition) {
         currentTool = tool
         devDockSettings.lastToolId = tool.id
-        titleLabel.text = tool.name
         networkLabel.text = if (tool.network) "需要网络" else ""
         setOperations(tool.operations)
         setEditorText(inputEditor, "")
@@ -512,8 +496,6 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         setEditorText(outputEditor, "")
         diffCard.isVisible = tool.id == "diffs"
         refreshWorkspaceLayout()
-        parameterText = ""
-        parameterHint.text = ""
         imageLabel.icon = null
         currentResult = ToolResult()
         selectedFile = null
@@ -526,7 +508,9 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     }
 
     private fun updateFavoriteButton() {
-        favoriteButton.text = if (currentTool.id in devDockSettings.favoriteToolIds) "★ 已收藏" else "☆ 收藏"
+        val favorite = currentTool.id in devDockSettings.favoriteToolIds
+        favoriteButton.text = if (favorite) "★" else "☆"
+        favoriteButton.toolTipText = if (favorite) "取消收藏" else "收藏工具"
     }
 
     private fun chooseFile() {
@@ -550,25 +534,10 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         updateEditorHighlighters()
     }
 
-    private fun editParameters() {
-        val result = Messages.showMultilineInputDialog(
-            project,
-            "正则、密钥、第二段文本、换算单位等参数",
-            "DevDock 参数",
-            parameterText,
-            null,
-            null,
-        )
-        if (result != null) {
-            parameterText = result
-            parameterHint.text = if (result.isBlank()) "" else "参数已设置"
-        }
-    }
-
     private fun execute() {
         val operation = selectedOperation
         val tool = currentTool
-        val secondaryInput = if (tool.id == "diffs") editorText(diffEditor) else parameterText
+        val secondaryInput = if (tool.id == "diffs") editorText(diffEditor) else ""
         val request = ToolRequest(project, operation, editorText(inputEditor), secondaryInput, selectedFile)
         setStatus("正在运行 ${tool.name}…")
         executeButton.isEnabled = false
