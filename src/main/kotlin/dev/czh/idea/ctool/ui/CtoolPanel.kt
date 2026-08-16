@@ -167,7 +167,8 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
             val button = JButton(category).apply {
                 isFocusable = false
                 isContentAreaFilled = true
-                border = JBUI.Borders.empty(3, 8)
+                border = JBUI.Borders.empty(2, 5)
+                font = font.deriveFont(12f)
                 addActionListener { setCategory(category) }
             }
             categoryButtons.add(button)
