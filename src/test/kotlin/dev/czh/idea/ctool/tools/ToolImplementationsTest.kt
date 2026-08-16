@@ -86,6 +86,13 @@ class ToolImplementationsTest {
         assertFalse(encrypted.isError)
         val decrypted = run("aes", "解密", encrypted.text, "secret")
         assertEquals("hello", decrypted.text)
+
+        val cbcOptions = "secret\nMODE=CBC\nPADDING=PKCS5Padding\nIV=00112233445566778899aabbccddeeff"
+        val cbcEncrypted = run("aes", "加密", "hello", cbcOptions)
+        assertFalse(cbcEncrypted.isError)
+        assertEquals("hello", run("aes", "解密", cbcEncrypted.text, cbcOptions).text)
+
+        assertEquals("AAECAw==", run("base64", "编码", "00010203", "ENCODING=Hex").text)
     }
 
     @Test
@@ -106,5 +113,9 @@ class ToolImplementationsTest {
         val signature = run("sign", "签名 SHA256withRSA", "hello", rsaPrivate)
         assertFalse(signature.isError)
         assertEquals("true", run("sign", "验证 SHA256withRSA", "hello", "$rsaPublic\n${signature.text}").text)
+
+        val configuredSignature = run("sign", "签名", "hello", "$rsaPrivate\nALGORITHM=SHA512withRSA")
+        assertFalse(configuredSignature.isError)
+        assertEquals("true", run("sign", "验证", "hello", "$rsaPublic\n${configuredSignature.text}\nALGORITHM=SHA512withRSA").text)
     }
 }

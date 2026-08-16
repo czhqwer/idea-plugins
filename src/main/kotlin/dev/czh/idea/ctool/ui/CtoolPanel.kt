@@ -102,6 +102,17 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private lateinit var workspaceContainer: JPanel
     private lateinit var outputCard: JComponent
     private lateinit var jsonWorkspace: JPanel
+    private lateinit var cryptoWorkspace: JPanel
+    private lateinit var cryptoConfigCard: JPanel
+    private lateinit var cryptoConfigPanel: JPanel
+    private lateinit var cryptoKeyField: JBTextField
+    private lateinit var cryptoIvField: JBTextField
+    private lateinit var cryptoUserIdField: JBTextField
+    private lateinit var cryptoSignatureField: JBTextField
+    private lateinit var cryptoModeBox: JComboBox<String>
+    private lateinit var cryptoPaddingBox: JComboBox<String>
+    private lateinit var cryptoEncodingBox: JComboBox<String>
+    private lateinit var cryptoAlgorithmBox: JComboBox<String>
     private lateinit var toolHeader: JPanel
     private lateinit var toolHeaderLeft: JPanel
     private lateinit var toolActionBar: JPanel
@@ -346,6 +357,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         inputColumn.add(diffCard, BorderLayout.SOUTH)
         outputCard = buildOutputCard()
         jsonWorkspace = buildJsonWorkspace()
+        cryptoWorkspace = buildCryptoWorkspace()
         workspaceContainer = JPanel(BorderLayout()).apply { isOpaque = false }
         refreshWorkspaceLayout()
         return workspaceContainer
@@ -364,6 +376,15 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
             workspaceContainer.repaint()
             return
         }
+        if (isCryptoTool(currentTool.id)) {
+            inputEditor.component.parent?.remove(inputEditor.component)
+            outputEditor.component.parent?.remove(outputEditor.component)
+            configureCryptoWorkspace()
+            workspaceContainer.add(cryptoWorkspace, BorderLayout.CENTER)
+            workspaceContainer.revalidate()
+            workspaceContainer.repaint()
+            return
+        }
         jsonWorkspace.remove(inputEditor.component)
         inputCard.add(inputEditor.component, BorderLayout.CENTER)
         val workspace = JBSplitter(isVerticalWorkspace(currentTool), 0.5f).apply {
@@ -377,6 +398,163 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
 
     private fun isVerticalWorkspace(tool: ToolDefinition): Boolean =
         tool.id !in setOf("json", "code", "serialize", "diffs")
+
+    private fun isCryptoTool(id: String): Boolean = id in setOf(
+        "hash", "hmac", "aes", "des", "tripleDes", "rc4", "rabbit", "sm2", "sm4", "rsa", "sign", "base64", "bcrypt",
+    )
+
+    private fun buildCryptoWorkspace(): JPanel {
+        val workspace = JPanel(BorderLayout(0, 6)).apply { isOpaque = false }
+        cryptoConfigCard = cardPanel()
+        cryptoConfigCard.add(cardHeader("配置", "根据当前工具填写必要参数"), BorderLayout.NORTH)
+        cryptoConfigPanel = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply { isOpaque = false }
+        cryptoConfigCard.add(cryptoConfigPanel, BorderLayout.CENTER)
+        return workspace
+    }
+
+    private fun configureCryptoWorkspace() {
+        configureCryptoControls(resetValues = true)
+        val needsExpandedConfig = currentTool.id == "sign" ||
+            (currentTool.id == "sm2" && selectedOperation in setOf("签名", "验证"))
+        cryptoConfigCard.preferredSize = Dimension(0, if (needsExpandedConfig) 128 else 84)
+        if (currentTool.id in setOf("hash", "hmac", "base64", "bcrypt")) {
+            val left = JPanel(BorderLayout(0, 6)).apply { isOpaque = false }
+            left.add(inputCard, BorderLayout.CENTER)
+            left.add(cryptoConfigCard, BorderLayout.SOUTH)
+            val split = JBSplitter(false, 0.45f).apply {
+                firstComponent = left
+                secondComponent = outputCard
+            }
+            cryptoWorkspace.removeAll()
+            cryptoWorkspace.add(split, BorderLayout.CENTER)
+            cryptoWorkspace.revalidate()
+            cryptoWorkspace.repaint()
+            return
+        }
+        inputCard.preferredSize = Dimension(0, 190)
+        val top = JPanel(BorderLayout(0, 6)).apply { isOpaque = false }
+        top.add(inputCard, BorderLayout.NORTH)
+        top.add(cryptoConfigCard, BorderLayout.SOUTH)
+        cryptoWorkspace.removeAll()
+        cryptoWorkspace.add(top, BorderLayout.NORTH)
+        cryptoWorkspace.add(outputCard, BorderLayout.CENTER)
+        cryptoWorkspace.revalidate()
+        cryptoWorkspace.repaint()
+    }
+
+    private fun configureCryptoControls(resetValues: Boolean) {
+        cryptoConfigPanel.removeAll()
+        cryptoKeyField = cryptoKeyFieldOrCreate()
+        cryptoIvField = cryptoIvFieldOrCreate()
+        cryptoUserIdField = cryptoUserIdFieldOrCreate()
+        cryptoSignatureField = cryptoSignatureFieldOrCreate()
+        cryptoModeBox = cryptoModeBoxOrCreate()
+        cryptoPaddingBox = cryptoPaddingBoxOrCreate()
+        cryptoEncodingBox = cryptoEncodingBoxOrCreate()
+        cryptoAlgorithmBox = cryptoAlgorithmBoxOrCreate()
+        setComboOptions(cryptoModeBox, listOf("ECB", "CBC", "CFB", "OFB"))
+        setComboOptions(
+            cryptoPaddingBox,
+            if (currentTool.id == "rsa") listOf("PKCS1Padding", "OAEP") else listOf("PKCS5Padding", "NoPadding"),
+        )
+        setComboOptions(cryptoEncodingBox, listOf("文本", "Hex", "Base64"))
+        setComboOptions(cryptoAlgorithmBox, listOf("MD5withRSA", "SHA1withRSA", "SHA256withRSA", "SHA512withRSA"))
+
+        if (resetValues) {
+            cryptoKeyField.text = ""
+            cryptoIvField.text = ""
+            cryptoUserIdField.text = "1234567812345678"
+            cryptoSignatureField.text = ""
+        }
+
+        when (currentTool.id) {
+            "hash" -> cryptoConfigPanel.add(configHint("点击上方哈希算法按钮即可执行"))
+            "hmac" -> {
+                cryptoConfigPanel.add(configField("密钥", cryptoKeyField, 300))
+                cryptoConfigPanel.add(configHint("输入内容使用 UTF-8 计算 HMAC"))
+            }
+            "aes", "des", "tripleDes", "sm4" -> {
+                cryptoConfigPanel.add(configField("Key", cryptoKeyField, 230))
+                cryptoConfigPanel.add(configCombo("模式", cryptoModeBox, 90))
+                cryptoConfigPanel.add(configCombo("Padding", cryptoPaddingBox, 120))
+                cryptoConfigPanel.add(configField("IV", cryptoIvField, 190))
+            }
+            "rc4", "rabbit" -> cryptoConfigPanel.add(configField("Key", cryptoKeyField, 300))
+            "sm2" -> {
+                if (selectedOperation == "生成密钥对") {
+                    cryptoConfigPanel.add(configHint("点击上方生成密钥对按钮即可生成 SM2 公钥和私钥"))
+                } else {
+                    cryptoConfigPanel.add(configField("密钥 Hex", cryptoKeyField, 360))
+                    if (selectedOperation == "签名" || selectedOperation == "验证") {
+                        cryptoConfigPanel.add(configField("UserId", cryptoUserIdField, 190))
+                    }
+                    if (selectedOperation == "验证") {
+                        cryptoConfigPanel.add(configField("签名 Hex", cryptoSignatureField, 300))
+                    }
+                }
+            }
+            "rsa" -> {
+                cryptoConfigPanel.add(configField("密钥 PEM/Base64", cryptoKeyField, 420))
+                cryptoConfigPanel.add(configCombo("Padding", cryptoPaddingBox, 120))
+            }
+            "sign" -> {
+                cryptoConfigPanel.add(configCombo("算法", cryptoAlgorithmBox, 170))
+                cryptoConfigPanel.add(configField("密钥 PEM/Base64", cryptoKeyField, 380))
+                if (selectedOperation.startsWith("验证")) {
+                    cryptoConfigPanel.add(configField("签名 Base64", cryptoSignatureField, 260))
+                }
+            }
+            "base64" -> cryptoConfigPanel.add(configCombo("编码", cryptoEncodingBox, 110))
+            "bcrypt" -> if (selectedOperation == "验证") {
+                cryptoConfigPanel.add(configField("哈希值", cryptoKeyField, 420))
+            } else {
+                cryptoConfigPanel.add(configHint("使用 BCrypt 生成强随机盐"))
+            }
+        }
+        cryptoConfigPanel.revalidate()
+        cryptoConfigPanel.repaint()
+    }
+
+    private fun cryptoKeyFieldOrCreate(): JBTextField = if (::cryptoKeyField.isInitialized) cryptoKeyField else JBTextField()
+
+    private fun cryptoIvFieldOrCreate(): JBTextField = if (::cryptoIvField.isInitialized) cryptoIvField else JBTextField()
+
+    private fun cryptoUserIdFieldOrCreate(): JBTextField = if (::cryptoUserIdField.isInitialized) cryptoUserIdField else JBTextField()
+
+    private fun cryptoSignatureFieldOrCreate(): JBTextField = if (::cryptoSignatureField.isInitialized) cryptoSignatureField else JBTextField()
+
+    private fun cryptoModeBoxOrCreate(): JComboBox<String> = if (::cryptoModeBox.isInitialized) cryptoModeBox else JComboBox(arrayOf("ECB", "CBC", "CFB", "OFB"))
+
+    private fun cryptoPaddingBoxOrCreate(): JComboBox<String> = if (::cryptoPaddingBox.isInitialized) cryptoPaddingBox else JComboBox(arrayOf("PKCS5Padding", "NoPadding", "OAEP"))
+
+    private fun cryptoEncodingBoxOrCreate(): JComboBox<String> = if (::cryptoEncodingBox.isInitialized) cryptoEncodingBox else JComboBox(arrayOf("文本", "Hex", "Base64"))
+
+    private fun cryptoAlgorithmBoxOrCreate(): JComboBox<String> = if (::cryptoAlgorithmBox.isInitialized) cryptoAlgorithmBox else JComboBox(arrayOf("MD5withRSA", "SHA1withRSA", "SHA256withRSA", "SHA512withRSA"))
+
+    private fun setComboOptions(combo: JComboBox<String>, options: List<String>) {
+        val current = combo.selectedItem?.toString()
+        combo.removeAllItems()
+        options.forEach(combo::addItem)
+        combo.selectedItem = current?.takeIf(options::contains) ?: options.firstOrNull()
+    }
+
+    private fun configField(label: String, field: JComponent, width: Int): JPanel = JPanel(BorderLayout(4, 0)).apply {
+        isOpaque = false
+        add(JBLabel(label), BorderLayout.WEST)
+        add(field, BorderLayout.CENTER)
+        preferredSize = Dimension(width, 28)
+    }
+
+    private fun configCombo(label: String, combo: JComboBox<String>, width: Int): JPanel = JPanel(BorderLayout(4, 0)).apply {
+        isOpaque = false
+        add(JBLabel(label), BorderLayout.WEST)
+        add(combo, BorderLayout.CENTER)
+        preferredSize = Dimension(width, 28)
+    }
+
+    private fun configHint(text: String): JBLabel = JBLabel(text).apply {
+        foreground = UIUtil.getContextHelpForeground()
+    }
 
     private fun buildJsonWorkspace(): JPanel {
         val workspace = JPanel(BorderLayout(0, 6)).apply {
@@ -681,6 +859,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private fun executeOperation(operation: String) {
         selectedOperation = operation
         updateEditorHighlighters()
+        if (isCryptoTool(currentTool.id)) configureCryptoControls(resetValues = false)
         execute()
     }
 
@@ -702,7 +881,11 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         }
         val operation = selectedOperation
         val tool = currentTool
-        val secondaryInput = if (tool.id == "diffs") editorText(diffEditor) else ""
+        val secondaryInput = when {
+            tool.id == "diffs" -> editorText(diffEditor)
+            isCryptoTool(tool.id) -> cryptoSecondaryInput()
+            else -> ""
+        }
         val request = ToolRequest(project, operation, editorText(inputEditor), secondaryInput, selectedFile)
         setStatus("正在运行 ${tool.name}…")
         setOperationButtonsEnabled(false)
@@ -718,6 +901,31 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
 
     private fun setOperationButtonsEnabled(enabled: Boolean) {
         operationButtons.components.forEach { it.isEnabled = enabled }
+    }
+
+    private fun cryptoSecondaryInput(): String = when (currentTool.id) {
+        "hmac" -> cryptoKeyField.text
+        "aes", "des", "tripleDes", "sm4" -> buildString {
+            append(cryptoKeyField.text)
+            append("\nMODE=").append(cryptoModeBox.selectedItem?.toString().orEmpty())
+            append("\nPADDING=").append(cryptoPaddingBox.selectedItem?.toString().orEmpty())
+            if (cryptoIvField.text.isNotBlank()) append("\nIV=").append(cryptoIvField.text)
+        }
+        "rc4", "rabbit" -> cryptoKeyField.text
+        "sm2" -> buildString {
+            append(cryptoKeyField.text)
+            if (cryptoUserIdField.text.isNotBlank()) append("\nUSERID=").append(cryptoUserIdField.text)
+            if (cryptoSignatureField.text.isNotBlank()) append("\n").append(cryptoSignatureField.text)
+        }
+        "rsa" -> "${cryptoKeyField.text}\nPADDING=${cryptoPaddingBox.selectedItem ?: "PKCS1Padding"}"
+        "sign" -> buildString {
+            append(cryptoKeyField.text)
+            if (cryptoSignatureField.text.isNotBlank()) append("\n").append(cryptoSignatureField.text)
+            append("\nALGORITHM=").append(cryptoAlgorithmBox.selectedItem ?: "SHA256withRSA")
+        }
+        "base64" -> "ENCODING=${cryptoEncodingBox.selectedItem ?: "文本"}"
+        "bcrypt" -> cryptoKeyField.text
+        else -> ""
     }
 
     private fun runJsonAction(operation: String) {
@@ -762,6 +970,12 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         setEditorText(diffEditor, "")
         setEditorText(outputEditor, "")
         jsonFilterField.text = ""
+        if (::cryptoKeyField.isInitialized) {
+            cryptoKeyField.text = ""
+            cryptoIvField.text = ""
+            cryptoSignatureField.text = ""
+            cryptoUserIdField.text = "1234567812345678"
+        }
         imageLabel.icon = null
         currentResult = ToolResult()
         setStatus("工作区已清空")

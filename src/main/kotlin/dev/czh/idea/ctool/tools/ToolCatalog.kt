@@ -13,7 +13,7 @@ object ToolCatalog {
         add(tool("sm2", "SM2", "加密", listOf("加密", "解密", "签名", "验证", "生成密钥对")))
         add(tool("sm4", "SM4", "加密", listOf("加密", "解密")))
         add(tool("rsa", "RSA", "加密", listOf("加密", "解密")))
-        add(tool("sign", "RSA 签名", "加密", listOf("签名 MD5withRSA", "验证 MD5withRSA", "签名 SHA1withRSA", "验证 SHA1withRSA", "签名 SHA256withRSA", "验证 SHA256withRSA", "签名 SHA512withRSA", "验证 SHA512withRSA", "生成密钥对"), "rsa signature"))
+        add(tool("sign", "RSA 签名", "加密", listOf("签名", "验证", "生成密钥对"), "rsa signature"))
         add(tool("base64", "Base64", "编码解码", listOf("编码", "解码"), "base64"))
         add(tool("json", "JSON 工具", "编码解码", listOf("格式化", "压缩", "转义", "JSON 转 XML", "JSON 转 TypeScript", "过滤"), "json jsonpath url params xml yaml typescript"))
         add(tool("url", "URL 编码", "编码解码", listOf("编码", "解码"), "url uri"))

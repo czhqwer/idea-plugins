@@ -81,6 +81,7 @@ import kotlin.math.pow
 import java.util.regex.Pattern
 import javax.crypto.Cipher
 import javax.crypto.Mac
+import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import javax.imageio.ImageIO
 import javax.xml.parsers.DocumentBuilderFactory
@@ -158,7 +159,11 @@ object ToolImplementations {
     }
 
     private fun base64(request: ToolRequest): ToolResult = when (request.operation) {
-        "编码" -> ToolResult(Base64.getEncoder().encodeToString(sourceBytes(request)))
+        "编码" -> {
+            val encoding = request.secondaryInput.substringAfter("ENCODING=", "文本").lineSequence().firstOrNull().orEmpty()
+            val bytes = if (encoding == "Hex") hexToBytes(request.input.trim()) else sourceBytes(request)
+            ToolResult(Base64.getEncoder().encodeToString(bytes))
+        }
         else -> ToolResult(Base64.getDecoder().decode(request.input.trim()).toString(StandardCharsets.UTF_8))
     }
 
@@ -771,9 +776,13 @@ object ToolImplementations {
             val pair = generator.generateKeyPair()
             return ToolResult("公钥：\n${pem("PUBLIC KEY", pair.public.encoded)}\n\n私钥：\n${pem("PRIVATE KEY", pair.private.encoded)}")
         }
-        val algorithm = request.operation.substringAfter(' ').ifBlank { "SHA256withRSA" }
+        val algorithm = request.secondaryInput.lineSequence()
+            .firstOrNull { it.startsWith("ALGORITHM=") }
+            ?.substringAfter("ALGORITHM=")
+            ?.takeIf(String::isNotBlank)
+            ?: request.operation.substringAfter(' ', "").ifBlank { "SHA256withRSA" }
         val keyText = extractKeyMaterial(request.secondaryInput)
-        if (keyText.isBlank()) return ToolResult("请在附加输入填写 RSA 私钥/公钥；验签时第二行填写签名 Base64", isError = true)
+        if (keyText.isBlank()) return ToolResult("请在附加配置填写 RSA 私钥/公钥；验签时填写签名 Base64", isError = true)
         val signature = Signature.getInstance(algorithm)
         val data = request.input.toByteArray(StandardCharsets.UTF_8)
         return if (request.operation.startsWith("签名")) {
@@ -782,7 +791,7 @@ object ToolImplementations {
             ToolResult(Base64.getEncoder().encodeToString(signature.sign()))
         } else {
             val verifyCode = extractTrailingKeyData(request.secondaryInput)
-            if (verifyCode.isBlank()) return ToolResult("验签时请在附加输入第二行填写签名 Base64", isError = true)
+            if (verifyCode.isBlank()) return ToolResult("验签时请填写签名 Base64", isError = true)
             signature.initVerify(readRsaPublicKey(keyText))
             signature.update(data)
             ToolResult(signature.verify(Base64.getDecoder().decode(verifyCode.trim())).toString())
@@ -949,14 +958,36 @@ object ToolImplementations {
         if (id == "sm2") return sm2(request)
         if (id == "rsa") return rsa(request)
         val algorithm = when (id) { "tripleDes" -> "DESede"; "rc4" -> "RC4"; "rabbit" -> "RABBIT"; "sm4" -> "SM4"; "des" -> "DES"; else -> "AES" }
-        val keyText = request.secondaryInput.lineSequence().firstOrNull { it.isNotBlank() } ?: "devdock-default-key"
+        val optionLines = request.secondaryInput.lineSequence().drop(1).mapNotNull { line ->
+            line.substringBefore('=', "").trim().takeIf(String::isNotBlank)?.let { it.uppercase(Locale.ROOT) to line.substringAfter('=', "").trim() }
+        }.toMap()
+        val keyText = request.secondaryInput.lineSequence().firstOrNull { it.isNotBlank() && !it.contains('=') } ?: "devdock-default-key"
         val key = normalizedKey(keyText, algorithm)
         val provider = if (algorithm == "SM4" || algorithm == "RABBIT") "BC" else null
-        val transformation = if (algorithm in setOf("RC4", "RABBIT")) algorithm else "$algorithm/ECB/PKCS5Padding"
+        val mode = optionLines["MODE"] ?: "ECB"
+        val padding = optionLines["PADDING"] ?: "PKCS5Padding"
+        val transformation = if (algorithm in setOf("RC4", "RABBIT")) algorithm else "$algorithm/$mode/$padding"
         val cipher = if (provider == null) Cipher.getInstance(transformation) else Cipher.getInstance(transformation, provider)
-        cipher.init(if (request.operation == "加密") Cipher.ENCRYPT_MODE else Cipher.DECRYPT_MODE, SecretKeySpec(key, algorithm))
+        val cipherMode = if (request.operation == "加密") Cipher.ENCRYPT_MODE else Cipher.DECRYPT_MODE
+        if (mode.equals("ECB", ignoreCase = true) || algorithm in setOf("RC4", "RABBIT")) {
+            cipher.init(cipherMode, SecretKeySpec(key, algorithm))
+        } else {
+            val ivText = optionLines["IV"].orEmpty()
+            if (ivText.isBlank()) return ToolResult("${mode} 模式需要填写 IV", isError = true)
+            cipher.init(cipherMode, SecretKeySpec(key, algorithm), IvParameterSpec(cipherBytes(ivText, cipher.blockSize)))
+        }
         return if (request.operation == "加密") ToolResult(Base64.getEncoder().encodeToString(cipher.doFinal(request.input.toByteArray(StandardCharsets.UTF_8))))
         else ToolResult(cipher.doFinal(Base64.getDecoder().decode(request.input.trim())).toString(StandardCharsets.UTF_8))
+    }
+
+    private fun cipherBytes(value: String, length: Int): ByteArray {
+        val trimmed = value.trim()
+        val bytes = if (trimmed.matches(Regex("(?i)[0-9a-f]+")) && trimmed.length % 2 == 0) {
+            hexToBytes(trimmed)
+        } else {
+            trimmed.toByteArray(StandardCharsets.UTF_8)
+        }
+        return bytes.copyOf(length)
     }
 
     private fun sm2(request: ToolRequest): ToolResult {
@@ -987,16 +1018,16 @@ object ToolImplementations {
             }
             "签名" -> {
                 val signer = SM2Signer()
-                signer.init(true, ParametersWithID(ParametersWithRandom(sm2PrivateKey(key, domain), SecureRandom()), "1234567812345678".toByteArray()))
+                signer.init(true, ParametersWithID(ParametersWithRandom(sm2PrivateKey(key, domain), SecureRandom()), sm2UserId(request)))
                 val bytes = request.input.toByteArray(StandardCharsets.UTF_8)
                 signer.update(bytes, 0, bytes.size)
                 ToolResult(signer.generateSignature().toHex())
             }
             "验证" -> {
-                val signature = request.secondaryInput.lineSequence().drop(1).firstOrNull { it.isNotBlank() }
+                val signature = request.secondaryInput.lineSequence().drop(1).firstOrNull { it.isNotBlank() && !it.startsWith("USERID=") }
                     ?: return ToolResult("附加输入第二行需要签名 Hex", isError = true)
                 val verifier = SM2Signer()
-                verifier.init(false, ParametersWithID(sm2PublicKey(key, domain), "1234567812345678".toByteArray()))
+                verifier.init(false, ParametersWithID(sm2PublicKey(key, domain), sm2UserId(request)))
                 val bytes = request.input.toByteArray(StandardCharsets.UTF_8)
                 verifier.update(bytes, 0, bytes.size)
                 ToolResult(verifier.verifySignature(hexToBytes(signature)).toString())
@@ -1004,6 +1035,12 @@ object ToolImplementations {
             else -> ToolResult("SM2 不支持操作：${request.operation}", isError = true)
         }
     }
+
+    private fun sm2UserId(request: ToolRequest): ByteArray = request.secondaryInput.lineSequence()
+        .firstOrNull { it.startsWith("USERID=") }
+        ?.substringAfter("USERID=")
+        ?.toByteArray(StandardCharsets.UTF_8)
+        ?: "1234567812345678".toByteArray(StandardCharsets.UTF_8)
 
     private fun sm2PublicKey(value: String, domain: ECDomainParameters): ECPublicKeyParameters {
         val normalized = value.replace(Regex("-----.*?-----"), "").replace(Regex("\\s+"), "")
@@ -1069,11 +1106,13 @@ object ToolImplementations {
 
     private fun extractTrailingKeyData(value: String): String {
         val begin = value.indexOf("-----BEGIN")
-        if (begin < 0) return value.lineSequence().drop(1).firstOrNull { it.isNotBlank() }.orEmpty()
+        if (begin < 0) return value.lineSequence().drop(1).firstOrNull { it.isNotBlank() && !it.startsWith("ALGORITHM=") }.orEmpty()
         val endStart = value.indexOf("-----END", begin)
         if (endStart < 0) return ""
         val end = value.indexOf("-----", endStart + "-----END".length)
-        return value.substring(if (end < 0) value.length else end + 5).lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()
+        return value.substring(if (end < 0) value.length else end + 5).lineSequence()
+            .firstOrNull { it.isNotBlank() && !it.startsWith("ALGORITHM=") }
+            .orEmpty()
     }
 
     private fun ip(request: ToolRequest): ToolResult {
