@@ -15,7 +15,6 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.ui.JBColor
 import com.intellij.ui.JBSplitter
 import com.intellij.ui.components.JBLabel
-import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
@@ -26,10 +25,14 @@ import dev.czh.idea.ctool.settings.devDockSettings
 import dev.czh.idea.ctool.tools.ToolCatalog
 import java.awt.BorderLayout
 import java.awt.Color
+import java.awt.Container
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.Insets
 import java.awt.event.ActionEvent
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
 import java.awt.event.KeyEvent
 import java.awt.datatransfer.StringSelection
 import java.nio.file.Path
@@ -45,12 +48,61 @@ import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 import com.intellij.openapi.Disposable
 
+private class WrapLayout(
+    alignment: Int = FlowLayout.LEFT,
+    hgap: Int = 3,
+    vgap: Int = 0,
+) : FlowLayout(alignment, hgap, vgap) {
+    override fun preferredLayoutSize(target: Container): Dimension = layoutSize(target, true)
+
+    override fun minimumLayoutSize(target: Container): Dimension {
+        val minimum = layoutSize(target, false)
+        minimum.width = (minimum.width - (hgap + 1)).coerceAtLeast(0)
+        return minimum
+    }
+
+    private fun layoutSize(target: Container, preferred: Boolean): Dimension {
+        synchronized(target.treeLock) {
+            val insets = target.insets
+            val horizontalInsetsAndGap = insets.left + insets.right + hgap * 2
+            val targetWidth = target.width
+            val maxWidth = if (targetWidth <= 0) Int.MAX_VALUE else targetWidth - horizontalInsetsAndGap
+            val dimension = Dimension(0, 0)
+            var rowWidth = 0
+            var rowHeight = 0
+
+            target.components.forEach { component ->
+                if (!component.isVisible) return@forEach
+                val size = if (preferred) component.preferredSize else component.minimumSize
+                if (rowWidth + size.width > maxWidth) {
+                    addRow(dimension, rowWidth, rowHeight)
+                    rowWidth = 0
+                    rowHeight = 0
+                }
+                if (rowWidth != 0) rowWidth += hgap
+                rowWidth += size.width
+                rowHeight = maxOf(rowHeight, size.height)
+            }
+            addRow(dimension, rowWidth, rowHeight)
+            dimension.width += horizontalInsetsAndGap
+            dimension.height += insets.top + insets.bottom + vgap * 2
+            return dimension
+        }
+    }
+
+    private fun addRow(dimension: Dimension, rowWidth: Int, rowHeight: Int) {
+        dimension.width = maxOf(dimension.width, rowWidth)
+        if (dimension.height > 0) dimension.height += vgap
+        dimension.height += rowHeight
+    }
+}
+
 class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
     private val borderColor = JBColor(Color(0xD9DEE7), Color(0x454B55))
     private val accentColor = JBColor(Color(0x2563EB), Color(0x5794FF))
     private val searchField = JBTextField()
-    private val categoryBar = JPanel(FlowLayout(FlowLayout.LEFT, 3, 0))
-    private val toolStrip = JPanel(FlowLayout(FlowLayout.LEFT, 3, 0))
+    private val categoryBar = JPanel(WrapLayout(FlowLayout.LEFT, 3, 0))
+    private val toolStrip = JPanel(WrapLayout(FlowLayout.LEFT, 3, 0))
     private val toolCountLabel = JBLabel()
     private val operationBox = JComboBox<String>()
     private val parameterButton = JButton("参数…")
@@ -61,6 +113,8 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private lateinit var outputEditor: EditorEx
     private lateinit var inputColumn: JPanel
     private lateinit var diffCard: JComponent
+    private lateinit var workspaceContainer: JPanel
+    private lateinit var outputCard: JComponent
     private val imageLabel = JBLabel()
     private val titleLabel = JBLabel()
     private val networkLabel = JBLabel()
@@ -89,20 +143,17 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         val top = JPanel(BorderLayout(8, 0)).apply { isOpaque = false }
         categoryBar.isOpaque = false
         buildCategoryButtons()
+        installWrapReflow(categoryBar)
         top.add(categoryBar, BorderLayout.CENTER)
         searchField.emptyText.text = "搜索工具、功能或关键词"
         searchField.preferredSize = Dimension(230, 28)
         top.add(searchField, BorderLayout.EAST)
 
         toolStrip.isOpaque = false
+        installWrapReflow(toolStrip)
         val toolPicker = JPanel(BorderLayout(6, 0)).apply { isOpaque = false }
         toolPicker.add(JBLabel("工具"), BorderLayout.WEST)
-        toolPicker.add(JBScrollPane(toolStrip).apply {
-            border = JBUI.Borders.empty()
-            horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
-            verticalScrollBarPolicy = JBScrollPane.VERTICAL_SCROLLBAR_NEVER
-            preferredSize = Dimension(0, 32)
-        }, BorderLayout.CENTER)
+        toolPicker.add(toolStrip, BorderLayout.CENTER)
         toolPicker.add(toolCountLabel, BorderLayout.EAST)
 
         val navigation = JPanel(BorderLayout(0, 3)).apply { isOpaque = false }
@@ -113,6 +164,15 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         header.add(navigation, BorderLayout.NORTH)
         header.add(JSeparator(), BorderLayout.SOUTH)
         add(header, BorderLayout.NORTH)
+    }
+
+    private fun installWrapReflow(panel: JPanel) {
+        panel.addComponentListener(object : ComponentAdapter() {
+            override fun componentResized(event: ComponentEvent?) {
+                panel.parent?.revalidate()
+                panel.parent?.parent?.revalidate()
+            }
+        })
     }
 
     private fun buildCategoryButtons() {
@@ -147,21 +207,17 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     }
 
     private fun buildBody() {
-        val main = JPanel(BorderLayout(0, 8)).apply { border = JBUI.Borders.empty(8, 0, 0, 0) }
-        val topControls = JPanel(BorderLayout(0, 6)).apply { isOpaque = false }
-        topControls.add(buildToolHeader(), BorderLayout.NORTH)
-        topControls.add(buildActionBar(), BorderLayout.SOUTH)
-        main.add(topControls, BorderLayout.NORTH)
+        val main = JPanel(BorderLayout(0, 6)).apply { border = JBUI.Borders.empty(6, 0, 0, 0) }
+        main.add(buildToolHeader(), BorderLayout.NORTH)
         main.add(buildWorkspace(), BorderLayout.CENTER)
         add(main, BorderLayout.CENTER)
     }
 
     private fun buildToolHeader(): JComponent {
-        val header = JPanel(BorderLayout(8, 0)).apply { isOpaque = false }
-        val titleRow = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply { isOpaque = false }
+        val header = JPanel(WrapLayout(FlowLayout.LEFT, 6, 0)).apply { isOpaque = false }
         titleLabel.font = titleLabel.font.deriveFont(Font.BOLD, 18f)
-        titleRow.add(titleLabel)
-        titleRow.add(JBLabel("模式"))
+        header.add(titleLabel)
+        header.add(JBLabel("模式"))
         operationBox.preferredSize = Dimension(170, 28)
         operationBox.isFocusable = false
         operationBox.addActionListener {
@@ -170,22 +226,33 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
                 updateEditorHighlighters()
             }
         }
-        titleRow.add(operationBox)
+        header.add(operationBox)
         parameterButton.isFocusable = false
         parameterButton.addActionListener { editParameters() }
         parameterHint.foreground = UIUtil.getContextHelpForeground()
         parameterHint.font = parameterHint.font.deriveFont(11f)
-        titleRow.add(parameterHint)
-        titleRow.add(parameterButton)
-        header.add(titleRow, BorderLayout.CENTER)
+        header.add(parameterHint)
+        header.add(parameterButton)
 
-        val controls = JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply { isOpaque = false }
+        executeButton.isFocusable = false
+        executeButton.background = accentColor
+        executeButton.foreground = Color.WHITE
+        executeButton.isOpaque = true
+        executeButton.border = JBUI.Borders.empty(6, 14)
+        executeButton.addActionListener { execute() }
+        header.add(executeButton)
+        header.add(quietButton("复制结果") { copyResult() })
+        header.add(quietButton("清空") { clearWorkspace() })
+
         networkLabel.foreground = JBColor(Color(0xA16207), Color(0xE9B949))
-        controls.add(networkLabel)
+        header.add(networkLabel)
+        statusLabel.foreground = UIUtil.getContextHelpForeground()
+        header.add(statusLabel)
+        favoriteButton.text = "☆ 收藏"
         favoriteButton.addActionListener { toggleFavorite() }
         favoriteButton.isFocusable = false
-        controls.add(favoriteButton)
-        header.add(controls, BorderLayout.EAST)
+        header.add(favoriteButton)
+        installWrapReflow(header)
         return header
     }
 
@@ -194,13 +261,28 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         inputColumn.add(buildInputCard(), BorderLayout.CENTER)
         diffCard = buildDiffCard()
         inputColumn.add(diffCard, BorderLayout.SOUTH)
-
-        val workspace = JBSplitter(false, 0.5f).apply {
-            firstComponent = inputColumn
-            secondComponent = buildOutputCard()
-        }
-        return workspace
+        outputCard = buildOutputCard()
+        workspaceContainer = JPanel(BorderLayout()).apply { isOpaque = false }
+        refreshWorkspaceLayout()
+        return workspaceContainer
     }
+
+    private fun refreshWorkspaceLayout() {
+        if (!::workspaceContainer.isInitialized) return
+        workspaceContainer.removeAll()
+        inputColumn.parent?.remove(inputColumn)
+        outputCard.parent?.remove(outputCard)
+        val workspace = JBSplitter(isVerticalWorkspace(currentTool), 0.5f).apply {
+            firstComponent = inputColumn
+            secondComponent = outputCard
+        }
+        workspaceContainer.add(workspace, BorderLayout.CENTER)
+        workspaceContainer.revalidate()
+        workspaceContainer.repaint()
+    }
+
+    private fun isVerticalWorkspace(tool: ToolDefinition): Boolean =
+        tool.id !in setOf("json", "code", "serialize", "diffs")
 
     private fun buildInputCard(): JComponent {
         val card = cardPanel()
@@ -233,27 +315,6 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         imageLabel.border = JBUI.Borders.empty(6)
         card.add(imageLabel, BorderLayout.SOUTH)
         return card
-    }
-
-    private fun buildActionBar(): JComponent {
-        val bar = JPanel(BorderLayout(8, 0)).apply {
-            border = JBUI.Borders.emptyTop(2)
-            isOpaque = false
-        }
-        val left = JPanel(FlowLayout(FlowLayout.LEFT, 5, 0)).apply { isOpaque = false }
-        executeButton.isFocusable = false
-        executeButton.background = accentColor
-        executeButton.foreground = Color.WHITE
-        executeButton.isOpaque = true
-        executeButton.border = JBUI.Borders.empty(6, 14)
-        executeButton.addActionListener { execute() }
-        left.add(executeButton)
-        left.add(quietButton("复制结果") { copyResult() })
-        left.add(quietButton("清空") { clearWorkspace() })
-        bar.add(left, BorderLayout.WEST)
-        statusLabel.foreground = UIUtil.getContextHelpForeground()
-        bar.add(statusLabel, BorderLayout.EAST)
-        return bar
     }
 
     private fun cardPanel(): JPanel = JPanel(BorderLayout(0, 8)).apply {
@@ -450,6 +511,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         setEditorText(diffEditor, "")
         setEditorText(outputEditor, "")
         diffCard.isVisible = tool.id == "diffs"
+        refreshWorkspaceLayout()
         parameterText = ""
         parameterHint.text = ""
         imageLabel.icon = null
