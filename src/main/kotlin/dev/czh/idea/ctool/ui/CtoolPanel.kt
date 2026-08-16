@@ -25,7 +25,6 @@ import dev.czh.idea.ctool.tools.ToolCatalog
 import dev.czh.idea.ctool.tools.ToolImplementations
 import java.awt.BorderLayout
 import java.awt.Color
-import java.awt.Container
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
@@ -46,59 +45,14 @@ import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
 import com.intellij.openapi.Disposable
 
-private class WrapLayout(
-    alignment: Int = FlowLayout.LEFT,
-    hgap: Int = 3,
-    vgap: Int = 0,
-) : FlowLayout(alignment, hgap, vgap) {
-    override fun preferredLayoutSize(target: Container): Dimension = layoutSize(target, true)
-
-    override fun minimumLayoutSize(target: Container): Dimension {
-        val minimum = layoutSize(target, false)
-        minimum.width = (minimum.width - (hgap + 1)).coerceAtLeast(0)
-        return minimum
-    }
-
-    private fun layoutSize(target: Container, preferred: Boolean): Dimension {
-        synchronized(target.treeLock) {
-            val insets = target.insets
-            val horizontalInsetsAndGap = insets.left + insets.right + hgap * 2
-            val targetWidth = target.width
-            val maxWidth = if (targetWidth <= 0) Int.MAX_VALUE else targetWidth - horizontalInsetsAndGap
-            val dimension = Dimension(0, 0)
-            var rowWidth = 0
-            var rowHeight = 0
-
-            target.components.forEach { component ->
-                if (!component.isVisible) return@forEach
-                val size = if (preferred) component.preferredSize else component.minimumSize
-                if (rowWidth + size.width > maxWidth) {
-                    addRow(dimension, rowWidth, rowHeight)
-                    rowWidth = 0
-                    rowHeight = 0
-                }
-                if (rowWidth != 0) rowWidth += hgap
-                rowWidth += size.width
-                rowHeight = maxOf(rowHeight, size.height)
-            }
-            addRow(dimension, rowWidth, rowHeight)
-            dimension.width += horizontalInsetsAndGap
-            dimension.height += insets.top + insets.bottom + vgap * 2
-            return dimension
-        }
-    }
-
-    private fun addRow(dimension: Dimension, rowWidth: Int, rowHeight: Int) {
-        dimension.width = maxOf(dimension.width, rowWidth)
-        if (dimension.height > 0) dimension.height += vgap
-        dimension.height += rowHeight
-    }
-}
-
 class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
     private val borderColor = JBColor(Color(0xD9DEE7), Color(0x454B55))
     private val accentColor = JBColor(Color(0x2563EB), Color(0x5794FF))
-    private val categoryBar = JPanel(WrapLayout(FlowLayout.LEFT, 3, 0))
+    private val categoryBar = JPanel(BorderLayout(3, 0))
+    private val categoryButtons = JPanel()
+    private val categoryOverflowButton = JButton("☰")
+    private var categories: List<String> = emptyList()
+    private var updatingCategoryOverflow = false
     private val toolBox = JComboBox<String>()
     private val modeLabel = JBLabel("模式")
     private val operationBox = JComboBox<String>()
@@ -114,6 +68,9 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private lateinit var outputCard: JComponent
     private lateinit var jsonWorkspace: JPanel
     private lateinit var toolHeader: JPanel
+    private lateinit var toolHeaderLeft: JPanel
+    private lateinit var toolActionBar: JPanel
+    private var toolHeaderWrapped = false
     private lateinit var genericCopyButton: JButton
     private lateinit var genericClearButton: JButton
     private lateinit var jsonActionsPanel: JPanel
@@ -143,8 +100,25 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
 
     private fun buildHeader() {
         categoryBar.isOpaque = false
+        categoryButtons.layout = javax.swing.BoxLayout(categoryButtons, javax.swing.BoxLayout.X_AXIS)
+        categoryButtons.isOpaque = false
+        categoryBar.add(categoryButtons, BorderLayout.CENTER)
+        categoryOverflowButton.apply {
+            isFocusable = false
+            preferredSize = Dimension(30, 26)
+            minimumSize = preferredSize
+            margin = JBUI.insets(2)
+            toolTipText = "更多菜单"
+            isVisible = false
+            addActionListener { showCategoryOverflowMenu() }
+        }
+        categoryBar.add(categoryOverflowButton, BorderLayout.EAST)
         buildCategoryButtons()
-        installWrapReflow(categoryBar)
+        categoryBar.addComponentListener(object : ComponentAdapter() {
+            override fun componentResized(event: ComponentEvent?) {
+                updateCategoryOverflow()
+            }
+        })
 
         val header = JPanel(BorderLayout(0, 3)).apply { isOpaque = false }
         header.add(categoryBar, BorderLayout.NORTH)
@@ -152,38 +126,81 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         add(header, BorderLayout.NORTH)
     }
 
-    private fun installWrapReflow(panel: JPanel) {
-        panel.addComponentListener(object : ComponentAdapter() {
-            override fun componentResized(event: ComponentEvent?) {
-                panel.parent?.revalidate()
-                panel.parent?.parent?.revalidate()
-            }
-        })
-    }
-
     private fun buildCategoryButtons() {
-        categoryBar.removeAll()
-        val categories = listOf("常用") + ToolCatalog.all.map { it.category }.distinct()
+        categories = listOf("常用") + ToolCatalog.all.map { it.category }.distinct()
+        categoryButtons.removeAll()
         categories.forEach { category ->
             val button = JButton(category).apply {
                 isFocusable = false
                 isContentAreaFilled = true
-                border = JBUI.Borders.empty(4, 10)
+                border = JBUI.Borders.empty(3, 8)
                 addActionListener { setCategory(category) }
             }
-            categoryBar.add(button)
+            categoryButtons.add(button)
         }
         updateCategoryButtons()
+        SwingUtilities.invokeLater { updateCategoryOverflow() }
     }
 
     private fun updateCategoryButtons() {
-        categoryBar.components.forEach { component ->
+        categoryButtons.components.forEach { component ->
             val button = component as? JButton ?: return@forEach
             val selected = button.text == activeCategory
             button.background = if (selected) JBColor(Color(0xE7F0FF), Color(0x244A7B)) else UIUtil.getPanelBackground()
             button.foreground = if (selected) accentColor else UIUtil.getLabelForeground()
             button.font = button.font.deriveFont(if (selected) Font.BOLD else Font.PLAIN)
         }
+    }
+
+    private fun updateCategoryOverflow() {
+        if (updatingCategoryOverflow || categoryBar.width <= 0) return
+        val buttons = categoryButtons.components.filterIsInstance<JButton>()
+        if (buttons.isEmpty()) return
+        updatingCategoryOverflow = true
+        try {
+            val availableWidth = categoryBar.width - categoryBar.insets.left - categoryBar.insets.right
+            val totalWidth = buttons.sumOf { it.preferredSize.width }
+            val needsOverflow = totalWidth > availableWidth
+            val widthForButtons = if (needsOverflow) {
+                availableWidth - categoryOverflowButton.preferredSize.width - 3
+            } else {
+                availableWidth
+            }
+            var usedWidth = 0
+            var hiddenCount = 0
+            buttons.forEach { button ->
+                val buttonWidth = button.preferredSize.width
+                val fits = hiddenCount == 0 && usedWidth + buttonWidth <= widthForButtons
+                button.isVisible = fits
+                if (fits) {
+                    usedWidth += buttonWidth
+                } else {
+                    hiddenCount++
+                }
+            }
+            categoryOverflowButton.isVisible = hiddenCount > 0
+            categoryButtons.revalidate()
+            categoryButtons.repaint()
+            categoryBar.revalidate()
+            categoryBar.repaint()
+        } finally {
+            updatingCategoryOverflow = false
+        }
+    }
+
+    private fun showCategoryOverflowMenu() {
+        val hiddenCategories = categoryButtons.components
+            .filterIsInstance<JButton>()
+            .filterNot(JButton::isVisible)
+            .map { it.text }
+        if (hiddenCategories.isEmpty()) return
+        val menu = javax.swing.JPopupMenu()
+        hiddenCategories.forEach { category ->
+            menu.add(javax.swing.JMenuItem(category).apply {
+                addActionListener { setCategory(category) }
+            })
+        }
+        menu.show(categoryOverflowButton, 0, categoryOverflowButton.height)
     }
 
     private fun setCategory(category: String) {
@@ -212,6 +229,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         val header = JPanel(BorderLayout(8, 0)).apply { isOpaque = false }
         toolHeader = header
         val left = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply { isOpaque = false }
+        toolHeaderLeft = left
         toolBox.preferredSize = Dimension(150, 28)
         toolBox.isFocusable = false
         toolBox.isOpaque = false
@@ -235,6 +253,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         header.add(left, BorderLayout.CENTER)
 
         val actionBar = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply { isOpaque = false }
+        toolActionBar = actionBar
         executeButton.isFocusable = false
         executeButton.background = accentColor
         executeButton.foreground = Color.WHITE
@@ -269,7 +288,35 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         favoriteButton.isFocusable = false
         actionBar.add(favoriteButton)
         header.add(actionBar, BorderLayout.EAST)
+        header.addComponentListener(object : ComponentAdapter() {
+            override fun componentResized(event: ComponentEvent?) {
+                updateToolHeaderLayout()
+            }
+        })
+        SwingUtilities.invokeLater { updateToolHeaderLayout() }
         return header
+    }
+
+    private fun updateToolHeaderLayout() {
+        if (!::toolHeader.isInitialized || toolHeader.width <= 0) return
+        val availableWidth = toolHeader.width - toolHeader.insets.left - toolHeader.insets.right
+        val requiredWidth = toolHeaderLeft.preferredSize.width + toolActionBar.preferredSize.width + 8
+        val shouldWrap = availableWidth < requiredWidth
+        if (shouldWrap == toolHeaderWrapped) return
+        toolHeaderWrapped = shouldWrap
+        toolHeader.remove(toolHeaderLeft)
+        toolHeader.remove(toolActionBar)
+        if (shouldWrap) {
+            toolHeader.layout = BorderLayout(0, 3)
+            toolHeader.add(toolHeaderLeft, BorderLayout.NORTH)
+            toolHeader.add(toolActionBar, BorderLayout.SOUTH)
+        } else {
+            toolHeader.layout = BorderLayout(8, 0)
+            toolHeader.add(toolHeaderLeft, BorderLayout.CENTER)
+            toolHeader.add(toolActionBar, BorderLayout.EAST)
+        }
+        toolHeader.revalidate()
+        toolHeader.repaint()
     }
 
     private fun buildWorkspace(): JComponent {
@@ -611,6 +658,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         genericCopyButton.isVisible = !isJson
         genericClearButton.isVisible = !isJson
         jsonActionsPanel.isVisible = isJson
+        updateToolHeaderLayout()
         toolHeader.revalidate()
         toolHeader.repaint()
     }
@@ -693,7 +741,12 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     }
 
     private fun setStatus(text: String, error: Boolean = false) {
-        statusLabel.text = text
+        val prefix = when {
+            error -> "⚠ "
+            text.startsWith("正在") || text == "准备就绪" || text.startsWith("此工具") -> ""
+            else -> "✓ "
+        }
+        statusLabel.text = prefix + text
         statusLabel.foreground = if (error) JBColor(Color(0xB42318), Color(0xFF8A80)) else UIUtil.getContextHelpForeground()
     }
 
