@@ -90,8 +90,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private var categories: List<String> = emptyList()
     private var updatingCategoryOverflow = false
     private val toolBox = JComboBox<String>()
-    private val modeLabel = JBLabel("模式")
-    private val operationBox = JComboBox<String>()
+    private val operationButtons = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0))
     private val jsonFilterField = JBTextField()
     private var selectedOperation = ""
     private lateinit var inputEditor: EditorEx
@@ -114,7 +113,6 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private val networkLabel = JBLabel()
     private val statusLabel = JBLabel("准备就绪")
     private val favoriteButton = FlatIconButton("☆")
-    private val executeButton = FlatIconButton("▶")
     private var selectedFile: Path? = null
     private var activeCategory = "常用"
     private var currentTool: ToolDefinition = ToolCatalog.find(devDockSettings.lastToolId)
@@ -264,7 +262,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private fun buildToolHeader(): JComponent {
         val header = JPanel(BorderLayout(8, 0)).apply { isOpaque = false }
         toolHeader = header
-        val left = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply { isOpaque = false }
+        val left = JPanel(BorderLayout(6, 0)).apply { isOpaque = false }
         toolHeaderLeft = left
         toolBox.preferredSize = Dimension(150, 28)
         toolBox.isFocusable = false
@@ -275,29 +273,15 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         toolBox.addActionListener {
             if (!updatingToolBox) allVisibleTools.getOrNull(toolBox.selectedIndex)?.let(::selectTool)
         }
-        left.add(toolBox)
-        left.add(modeLabel)
-        operationBox.preferredSize = Dimension(170, 28)
-        operationBox.isFocusable = false
-        operationBox.addActionListener {
-            operationBox.selectedItem?.toString()?.takeIf(String::isNotBlank)?.let {
-                selectedOperation = it
-                updateEditorHighlighters()
-            }
-        }
-        left.add(operationBox)
+        left.add(toolBox, BorderLayout.WEST)
+        operationButtons.isOpaque = false
+        left.add(operationButtons, BorderLayout.CENTER)
         header.add(left, BorderLayout.CENTER)
 
         val actionBar = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply { isOpaque = false }
         toolActionBar = actionBar
-        executeButton.isFocusable = false
-        executeButton.primary = true
-        executeButton.foreground = Color.WHITE
-        executeButton.toolTipText = "运行（Ctrl+Enter）"
-        executeButton.addActionListener { execute() }
         genericCopyButton = iconButton("⧉", "复制结果") { copyResult() }
         genericClearButton = iconButton("×", "清空输入和结果") { clearWorkspace() }
-        actionBar.add(executeButton)
         actionBar.add(genericCopyButton)
         actionBar.add(genericClearButton)
 
@@ -673,18 +657,57 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     }
 
     private fun setOperations(operations: List<String>) {
-        operationBox.removeAllItems()
-        operations.forEach(operationBox::addItem)
+        operationButtons.removeAll()
+        operations.forEach { operation ->
+            operationButtons.add(iconButton(operationIcon(operation), operation) {
+                executeOperation(operation)
+            })
+        }
         selectedOperation = operations.firstOrNull().orEmpty()
-        operationBox.selectedIndex = if (operations.isEmpty()) -1 else 0
+        operationButtons.revalidate()
+        operationButtons.repaint()
         updateEditorHighlighters()
+    }
+
+    private fun operationIcon(operation: String): String = when {
+        operation.contains("JavaScript", ignoreCase = true) -> "JS"
+        operation.contains("TypeScript", ignoreCase = true) -> "TS"
+        operation.contains("HTML", ignoreCase = true) -> "<>"
+        operation.contains("GraphQL", ignoreCase = true) -> "GQ"
+        operation.contains("JSON", ignoreCase = true) -> "{}"
+        operation.contains("CSS", ignoreCase = true) -> "#"
+        operation.contains("YAML", ignoreCase = true) -> "Y"
+        operation.contains("XML", ignoreCase = true) -> "X"
+        operation.contains("加密") || operation.contains("签名") -> "↗"
+        operation.contains("解密") || operation.contains("验证") -> "✓"
+        operation.contains("生成") -> "+"
+        operation.contains("压缩") -> "−"
+        operation.contains("解压") -> "+"
+        operation.contains("编码") -> "↗"
+        operation.contains("解码") -> "↙"
+        operation.contains("查询") || operation.contains("搜索") -> "⌕"
+        operation.contains("解析") -> "⌁"
+        operation.contains("转换") -> "⇄"
+        operation.contains("替换") -> "↔"
+        operation.contains("匹配") -> ".*"
+        operation.contains("查找") -> "⌕"
+        operation.contains("过滤") -> "ƒ"
+        operation.contains("校验") || operation.contains("检查") -> "✓"
+        operation.contains("连接") -> "↔"
+        operation.contains("发送") -> "↗"
+        operation.length <= 2 -> operation
+        else -> operation.take(2)
+    }
+
+    private fun executeOperation(operation: String) {
+        selectedOperation = operation
+        updateEditorHighlighters()
+        execute()
     }
 
     private fun updateToolHeader() {
         val isJson = currentTool.id == "json"
-        modeLabel.isVisible = !isJson
-        operationBox.isVisible = !isJson
-        executeButton.isVisible = !isJson
+        operationButtons.isVisible = !isJson
         genericCopyButton.isVisible = !isJson
         genericClearButton.isVisible = !isJson
         jsonActionsPanel.isVisible = isJson
@@ -703,15 +726,19 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         val secondaryInput = if (tool.id == "diffs") editorText(diffEditor) else ""
         val request = ToolRequest(project, operation, editorText(inputEditor), secondaryInput, selectedFile)
         setStatus("正在运行 ${tool.name}…")
-        executeButton.isEnabled = false
+        setOperationButtonsEnabled(false)
         imageLabel.icon = null
         ApplicationManager.getApplication().executeOnPooledThread {
             val result = tool.handler(request)
             SwingUtilities.invokeLater {
-                executeButton.isEnabled = true
+                setOperationButtonsEnabled(true)
                 showResult(result)
             }
         }
+    }
+
+    private fun setOperationButtonsEnabled(enabled: Boolean) {
+        operationButtons.components.forEach { it.isEnabled = enabled }
     }
 
     private fun runJsonAction(operation: String) {
