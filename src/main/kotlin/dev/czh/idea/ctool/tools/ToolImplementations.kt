@@ -1,7 +1,9 @@
 package dev.czh.idea.ctool.tools
 
 import com.google.gson.GsonBuilder
+import com.google.gson.JsonArray
 import com.google.gson.JsonElement
+import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.google.gson.JsonPrimitive
 import com.google.zxing.BarcodeFormat
@@ -43,6 +45,7 @@ import org.yaml.snakeyaml.DumperOptions
 import org.yaml.snakeyaml.Yaml
 import java.awt.Color
 import java.awt.image.BufferedImage
+import java.io.ByteArrayInputStream
 import java.math.BigInteger
 import java.net.IDN
 import java.net.URI
@@ -80,6 +83,9 @@ import javax.crypto.Cipher
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import javax.imageio.ImageIO
+import javax.xml.parsers.DocumentBuilderFactory
+import org.w3c.dom.Element
+import org.w3c.dom.Node
 
 object ToolImplementations {
     private val gson = GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create()
@@ -188,8 +194,300 @@ object ToolImplementations {
             request.operation == "中文转 Unicode" -> ToolResult(encodeUnicode(request.input))
             request.operation == "转 GET 参数" -> ToolResult(jsonToQuery(root))
             request.operation == "JSONPath" -> ToolResult(jsonPath(root, request.secondaryInput.ifBlank { "$." }))
+            request.operation == "JSON 转 XML" -> ToolResult(jsonToXml(root))
+            request.operation == "JSON 转 TypeScript" -> ToolResult(jsonToTypeScript(root))
+            request.operation == "过滤" -> ToolResult(gson.toJson(applyJsonFilter(root, request.secondaryInput)))
             else -> ToolResult(gson.toJson(root))
         }
+    }
+
+    fun normalizeJsonInput(input: String): ToolResult = try {
+        ToolResult(gson.toJson(parseJsonLikeInput(input)))
+    } catch (e: Exception) {
+        ToolResult(e.message ?: "无法识别输入格式", isError = true)
+    }
+
+    fun jsonEditorAction(operation: String, input: String, filter: String = ""): ToolResult = try {
+        val root = parseJsonLikeInput(input)
+        when (operation) {
+            "格式化" -> ToolResult(gson.toJson(root))
+            "压缩" -> ToolResult(compactGson.toJson(root))
+            "转义" -> ToolResult(gson.toJson(input))
+            "JSON 转 XML" -> ToolResult(jsonToXml(root))
+            "JSON 转 TypeScript" -> ToolResult(jsonToTypeScript(root))
+            "过滤" -> ToolResult(gson.toJson(applyJsonFilter(root, filter)))
+            else -> ToolResult(gson.toJson(root))
+        }
+    } catch (e: Exception) {
+        ToolResult(e.message ?: "JSON 操作失败", isError = true)
+    }
+
+    private fun parseJsonLikeInput(input: String): JsonElement {
+        val value = input.trim()
+        require(value.isNotBlank()) { "请输入 JSON、URL Params、XML 或 YAML" }
+        try {
+            return JsonParser.parseString(value)
+        } catch (_: Exception) {
+            // Continue with the lightweight format detectors below.
+        }
+        if (looksLikeUrlParams(value)) return urlParamsToJson(value)
+        if (value.startsWith("<")) return xmlToJson(value)
+        if (looksLikeYaml(value)) return yamlToJson(value)
+        throw IllegalArgumentException("无法识别输入格式")
+    }
+
+    private fun looksLikeUrlParams(value: String): Boolean {
+        val query = value.substringAfter('?', value)
+        return query.contains('=') && !value.contains('{') && !value.contains('<') && !query.contains('\n')
+    }
+
+    private fun looksLikeYaml(value: String): Boolean =
+        value.contains('\n') && Regex("(?m)^\\s*(?:[-]\\s+|[A-Za-z0-9_\\-]+\\s*:)").containsMatchIn(value)
+
+    private fun urlParamsToJson(input: String): JsonElement {
+        val root = JsonObject()
+        val query = input.substringAfter('?', input).substringBefore('#')
+        query.split('&', ';').filter(String::isNotBlank).forEach { pair ->
+            val key = decodeQueryPart(pair.substringBefore('=')).trim()
+            if (key.isBlank()) return@forEach
+            val rawValue = pair.substringAfter('=', "")
+            val value = scalarJson(decodeQueryPart(rawValue))
+            val existing = root.get(key)
+            if (existing == null) {
+                root.add(key, value)
+            } else if (existing.isJsonArray) {
+                existing.asJsonArray.add(value)
+            } else {
+                root.add(key, JsonArray().apply {
+                    add(existing)
+                    add(value)
+                })
+            }
+        }
+        return root
+    }
+
+    private fun decodeQueryPart(value: String): String = URLDecoder.decode(value.replace("+", " "), StandardCharsets.UTF_8)
+
+    private fun scalarJson(value: String): JsonElement = when {
+        value.equals("null", true) -> com.google.gson.JsonNull.INSTANCE
+        value.equals("true", true) -> JsonPrimitive(true)
+        value.equals("false", true) -> JsonPrimitive(false)
+        value.matches(Regex("-?\\d+")) -> JsonPrimitive(value.toLong())
+        value.toDoubleOrNull() != null -> JsonPrimitive(value.toDouble())
+        else -> JsonPrimitive(value)
+    }
+
+    private fun yamlToJson(input: String): JsonElement = gson.toJsonTree(Yaml().load<Any?>(input))
+
+    private fun xmlToJson(input: String): JsonElement {
+        val factory = DocumentBuilderFactory.newInstance()
+        factory.isNamespaceAware = false
+        val document = factory.newDocumentBuilder().parse(ByteArrayInputStream(input.toByteArray(StandardCharsets.UTF_8)))
+        return JsonObject().apply {
+            add(document.documentElement.nodeName, xmlElementToJson(document.documentElement))
+        }
+    }
+
+    private fun xmlElementToJson(element: Element): JsonElement {
+        val children = (0 until element.childNodes.length)
+            .map { element.childNodes.item(it) }
+            .filter { it.nodeType == Node.ELEMENT_NODE }
+            .map { it as Element }
+        val text = (0 until element.childNodes.length)
+            .map { element.childNodes.item(it) }
+            .filter { it.nodeType == Node.TEXT_NODE || it.nodeType == Node.CDATA_SECTION_NODE }
+            .joinToString("") { it.nodeValue.orEmpty() }
+            .trim()
+        if (children.isEmpty() && element.attributes.length == 0) return JsonPrimitive(text)
+
+        val result = JsonObject()
+        for (index in 0 until element.attributes.length) {
+            val attribute = element.attributes.item(index)
+            result.add("@${attribute.nodeName}", JsonPrimitive(attribute.nodeValue))
+        }
+        children.groupBy { it.nodeName }.forEach { (name, nodes) ->
+            if (nodes.size == 1) result.add(name, xmlElementToJson(nodes.first()))
+            else result.add(name, JsonArray().apply { nodes.forEach { add(xmlElementToJson(it)) } })
+        }
+        if (text.isNotBlank()) result.add("#text", JsonPrimitive(text))
+        return result
+    }
+
+    private fun jsonToXml(root: JsonElement): String = "<root>${jsonXmlContent(root)}</root>"
+
+    private fun jsonXmlContent(value: JsonElement): String = when {
+        value.isJsonObject -> value.asJsonObject.entrySet().joinToString("") { (key, child) -> jsonXmlNode(key, child) }
+        value.isJsonArray -> value.asJsonArray.joinToString("") { jsonXmlNode("item", it) }
+        value.isJsonNull -> ""
+        else -> xmlEscape(value.asString)
+    }
+
+    private fun jsonXmlNode(name: String, value: JsonElement): String =
+        "<${xmlName(name)}>${jsonXmlContent(value)}</${xmlName(name)}>"
+
+    private fun xmlName(value: String): String = value.replace(Regex("[^A-Za-z0-9_.-]"), "_").let {
+        if (it.firstOrNull()?.isDigit() == true) "_$it" else it.ifBlank { "item" }
+    }
+
+    private fun xmlEscape(value: String): String = value
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&apos;")
+
+    private fun jsonToTypeScript(root: JsonElement): String = if (root.isJsonObject) {
+        val fields = root.asJsonObject.entrySet().joinToString("\n") { (key, value) ->
+            "  ${tsPropertyName(key)}: ${tsType(value, key, 1)};"
+        }
+        "interface Root {\n$fields\n}"
+    } else {
+        "type Root = ${tsType(root, "Root", 0)};"
+    }
+
+    private fun tsType(value: JsonElement, hint: String, level: Int): String = when {
+        value.isJsonObject -> {
+            val indent = "  ".repeat(level)
+            val fields = value.asJsonObject.entrySet().joinToString("\n") { (key, child) ->
+                "$indent  ${tsPropertyName(key)}: ${tsType(child, key, level + 1)};"
+            }
+            "{\n$fields\n$indent}"
+        }
+        value.isJsonArray -> if (value.asJsonArray.isEmpty) "unknown[]" else "Array<${tsType(value.asJsonArray.first(), "${hint}Item", level)}>"
+        value.isJsonNull -> "null"
+        value.asJsonPrimitive.isBoolean -> "boolean"
+        value.asJsonPrimitive.isNumber -> "number"
+        else -> "string"
+    }
+
+    private fun tsPropertyName(value: String): String =
+        if (Regex("^[A-Za-z_$][A-Za-z0-9_$]*$").matches(value)) value else gson.toJson(value)
+
+    private fun applyJsonFilter(root: JsonElement, expression: String): JsonElement {
+        val normalized = expression.trim().removePrefix("data").removePrefix("this").trim().removePrefix(".")
+        if (normalized.isBlank()) return root
+        var current = root
+        splitJsChain(normalized).forEach { segment ->
+            val step = segment.trim()
+            when {
+                step.startsWith("filter(") -> {
+                    val predicate = step.substringAfter("=>", "true").removeSuffix(")").trim()
+                    current = if (current.isJsonArray) JsonArray().apply {
+                        current.asJsonArray.filter { matchesJsonPredicate(it, predicate) }.forEach(::add)
+                    } else current
+                }
+                step.startsWith("map(") -> {
+                    val selector = step.substringAfter("=>", "x").removeSuffix(")").trim()
+                    current = if (current.isJsonArray) JsonArray().apply {
+                        current.asJsonArray.forEach { add(resolveJsonExpression(it, selector)) }
+                    } else resolveJsonExpression(current, selector)
+                }
+                else -> current = resolveJsonExpression(current, step)
+            }
+        }
+        return current
+    }
+
+    private fun splitJsChain(expression: String): List<String> {
+        val result = mutableListOf<String>()
+        var depth = 0
+        var start = 0
+        expression.forEachIndexed { index, char ->
+            when (char) {
+                '(' -> depth++
+                ')' -> depth--
+                '.' -> if (depth == 0) {
+                    result += expression.substring(start, index)
+                    start = index + 1
+                }
+            }
+        }
+        result += expression.substring(start)
+        return result.filter(String::isNotBlank)
+    }
+
+    private fun resolveJsonExpression(element: JsonElement, expression: String): JsonElement {
+        val value = expression.trim().removePrefix("return").trim().removeSuffix(";").trim()
+        if (value == "x" || value == "it" || value == "item" || value == "value") return element
+        val path = value.replaceFirst(Regex("^[A-Za-z_$][A-Za-z0-9_$]*\\."), "")
+        return resolveJsonPath(element, path)
+    }
+
+    private fun resolveJsonPath(root: JsonElement, path: String): JsonElement {
+        var current = root
+        Regex("[A-Za-z_$][A-Za-z0-9_$]*|\\[(\\d+)]").findAll(path.removePrefix(".")).forEach { match ->
+            val token = match.value
+            current = if (token.startsWith("[")) {
+                val index = token.substring(1, token.length - 1).toInt()
+                if (current.isJsonArray && index in 0 until current.asJsonArray.size()) current.asJsonArray[index] else com.google.gson.JsonNull.INSTANCE
+            } else if (current.isJsonObject) {
+                current.asJsonObject[token] ?: com.google.gson.JsonNull.INSTANCE
+            } else {
+                com.google.gson.JsonNull.INSTANCE
+            }
+        }
+        return current
+    }
+
+    private fun matchesJsonPredicate(element: JsonElement, predicate: String): Boolean {
+        val expression = predicate.trim().removePrefix("return").trim().removeSuffix(";").trim()
+        if (expression.contains("&&")) return expression.split("&&").all { matchesJsonPredicate(element, it) }
+        if (expression.contains("||")) return expression.split("||").any { matchesJsonPredicate(element, it) }
+        if (expression.startsWith("!")) return !matchesJsonPredicate(element, expression.drop(1))
+        Regex("^(.+?)\\s*(===|!==|==|!=|>=|<=|>|<)\\s*(.+)$").matchEntire(expression)?.let { match ->
+            val left = resolveJsonExpression(element, match.groupValues[1])
+            val right = parseJsLiteral(element, match.groupValues[3])
+            return compareJson(left, right, match.groupValues[2])
+        }
+        Regex("^(.+?)\\.(includes|startsWith|endsWith)\\((.+)\\)$").matchEntire(expression)?.let { match ->
+            val left = resolveJsonExpression(element, match.groupValues[1])
+            val right = parseJsLiteral(element, match.groupValues[3])
+            return when (match.groupValues[2]) {
+                "includes" -> if (left.isJsonArray) left.asJsonArray.any { compareJson(it, right, "==") } else left.isJsonPrimitive && left.asString.contains(right.asString)
+                "startsWith" -> left.isJsonPrimitive && left.asString.startsWith(right.asString)
+                else -> left.isJsonPrimitive && left.asString.endsWith(right.asString)
+            }
+        }
+        return truthy(resolveJsonExpression(element, expression))
+    }
+
+    private fun parseJsLiteral(element: JsonElement, value: String): JsonElement {
+        val literal = value.trim()
+        return when {
+            literal.length >= 2 && literal.first() == '"' && literal.last() == '"' -> JsonPrimitive(literal.substring(1, literal.length - 1))
+            literal.length >= 2 && literal.first() == '\'' && literal.last() == '\'' -> JsonPrimitive(literal.substring(1, literal.length - 1))
+            literal.equals("true", true) -> JsonPrimitive(true)
+            literal.equals("false", true) -> JsonPrimitive(false)
+            literal.equals("null", true) -> com.google.gson.JsonNull.INSTANCE
+            literal.toDoubleOrNull() != null -> JsonPrimitive(literal.toDouble())
+            else -> resolveJsonExpression(element, literal)
+        }
+    }
+
+    private fun compareJson(left: JsonElement, right: JsonElement, operator: String): Boolean {
+        val same = if (left.isJsonPrimitive && right.isJsonPrimitive && left.asJsonPrimitive.isNumber && right.asJsonPrimitive.isNumber) {
+            left.asDouble == right.asDouble
+        } else {
+            gson.toJson(left) == gson.toJson(right)
+        }
+        return when (operator) {
+            "===", "==" -> same
+            "!==", "!=" -> !same
+            ">" -> left.asDouble > right.asDouble
+            ">=" -> left.asDouble >= right.asDouble
+            "<" -> left.asDouble < right.asDouble
+            else -> left.asDouble <= right.asDouble
+        }
+    }
+
+    private fun truthy(value: JsonElement): Boolean = when {
+        value.isJsonNull -> false
+        value.isJsonArray -> value.asJsonArray.size() > 0
+        value.isJsonObject -> true
+        value.asJsonPrimitive.isBoolean -> value.asBoolean
+        value.asJsonPrimitive.isNumber -> value.asDouble != 0.0
+        else -> value.asString.isNotEmpty()
     }
 
     private fun code(request: ToolRequest): ToolResult = when (request.operation) {

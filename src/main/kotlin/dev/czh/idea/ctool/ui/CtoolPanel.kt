@@ -22,6 +22,7 @@ import dev.czh.idea.ctool.model.ToolRequest
 import dev.czh.idea.ctool.model.ToolResult
 import dev.czh.idea.ctool.settings.devDockSettings
 import dev.czh.idea.ctool.tools.ToolCatalog
+import dev.czh.idea.ctool.tools.ToolImplementations
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Container
@@ -102,15 +103,23 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private val searchField = JBTextField()
     private val categoryBar = JPanel(WrapLayout(FlowLayout.LEFT, 3, 0))
     private val toolBox = JComboBox<String>()
+    private val modeLabel = JBLabel("模式")
     private val operationBox = JComboBox<String>()
+    private val jsonFilterField = JBTextField()
     private var selectedOperation = ""
     private lateinit var inputEditor: EditorEx
     private lateinit var diffEditor: EditorEx
     private lateinit var outputEditor: EditorEx
     private lateinit var inputColumn: JPanel
+    private lateinit var inputCard: JComponent
     private lateinit var diffCard: JComponent
     private lateinit var workspaceContainer: JPanel
     private lateinit var outputCard: JComponent
+    private lateinit var jsonWorkspace: JPanel
+    private lateinit var toolHeader: JPanel
+    private lateinit var genericCopyButton: JButton
+    private lateinit var genericClearButton: JButton
+    private lateinit var jsonActionsPanel: JPanel
     private val imageLabel = JBLabel()
     private val networkLabel = JBLabel()
     private val statusLabel = JBLabel("准备就绪")
@@ -122,6 +131,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private var currentResult = ToolResult()
     private var allVisibleTools: List<ToolDefinition> = ToolCatalog.all
     private var updatingToolBox = false
+    private var updatingJsonEditor = false
 
     init {
         background = UIUtil.getPanelBackground()
@@ -199,18 +209,20 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     }
 
     private fun buildToolHeader(): JComponent {
-        val header = JPanel(WrapLayout(FlowLayout.LEFT, 6, 0)).apply { isOpaque = false }
-        toolBox.preferredSize = Dimension(150, 32)
+        val header = JPanel(BorderLayout(8, 0)).apply { isOpaque = false }
+        toolHeader = header
+        val left = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply { isOpaque = false }
+        toolBox.preferredSize = Dimension(150, 28)
         toolBox.isFocusable = false
         toolBox.isOpaque = false
-        toolBox.border = JBUI.Borders.empty()
-        toolBox.font = toolBox.font.deriveFont(Font.BOLD, 18f)
+        toolBox.border = JBUI.Borders.empty(0, 0, 0, 4)
+        toolBox.font = toolBox.font.deriveFont(Font.PLAIN, 13f)
         toolBox.toolTipText = "切换工具"
         toolBox.addActionListener {
             if (!updatingToolBox) allVisibleTools.getOrNull(toolBox.selectedIndex)?.let(::selectTool)
         }
-        header.add(toolBox)
-        header.add(JBLabel("模式"))
+        left.add(toolBox)
+        left.add(modeLabel)
         operationBox.preferredSize = Dimension(170, 28)
         operationBox.isFocusable = false
         operationBox.addActionListener {
@@ -219,7 +231,10 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
                 updateEditorHighlighters()
             }
         }
-        header.add(operationBox)
+        left.add(operationBox)
+        header.add(left, BorderLayout.CENTER)
+
+        val actionBar = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply { isOpaque = false }
         executeButton.isFocusable = false
         executeButton.background = accentColor
         executeButton.foreground = Color.WHITE
@@ -228,29 +243,45 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         executeButton.margin = JBUI.insets(3, 7)
         executeButton.toolTipText = "运行（Ctrl+Enter）"
         executeButton.addActionListener { execute() }
-        header.add(executeButton)
-        header.add(iconButton("⧉", "复制结果") { copyResult() })
-        header.add(iconButton("×", "清空输入和结果") { clearWorkspace() })
+        genericCopyButton = iconButton("⧉", "复制结果") { copyResult() }
+        genericClearButton = iconButton("×", "清空输入和结果") { clearWorkspace() }
+        actionBar.add(executeButton)
+        actionBar.add(genericCopyButton)
+        actionBar.add(genericClearButton)
+
+        jsonActionsPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 2, 0)).apply {
+            isOpaque = false
+            add(iconButton("{}", "格式化并复制") { runJsonAction("格式化") })
+            add(iconButton("−", "压缩 JSON 并复制") { runJsonAction("压缩") })
+            add(iconButton("\"", "JSON 转义并复制") { runJsonAction("转义") })
+            add(iconButton("<>", "JSON 转 XML 并复制") { runJsonAction("JSON 转 XML") })
+            add(iconButton("TS", "JSON 转 TypeScript 并复制") { runJsonAction("JSON 转 TypeScript") })
+            add(iconButton("⧉", "复制 JSON") { copyResult() })
+            isVisible = false
+        }
+        actionBar.add(jsonActionsPanel)
 
         networkLabel.foreground = JBColor(Color(0xA16207), Color(0xE9B949))
-        header.add(networkLabel)
+        actionBar.add(networkLabel)
         statusLabel.foreground = UIUtil.getContextHelpForeground()
-        header.add(statusLabel)
+        actionBar.add(statusLabel)
         favoriteButton.preferredSize = Dimension(32, 28)
         favoriteButton.margin = JBUI.insets(3)
         favoriteButton.addActionListener { toggleFavorite() }
         favoriteButton.isFocusable = false
-        header.add(favoriteButton)
-        installWrapReflow(header)
+        actionBar.add(favoriteButton)
+        header.add(actionBar, BorderLayout.EAST)
         return header
     }
 
     private fun buildWorkspace(): JComponent {
         inputColumn = JPanel(BorderLayout(0, 8)).apply { isOpaque = false }
-        inputColumn.add(buildInputCard(), BorderLayout.CENTER)
+        inputCard = buildInputCard()
+        inputColumn.add(inputCard, BorderLayout.CENTER)
         diffCard = buildDiffCard()
         inputColumn.add(diffCard, BorderLayout.SOUTH)
         outputCard = buildOutputCard()
+        jsonWorkspace = buildJsonWorkspace()
         workspaceContainer = JPanel(BorderLayout()).apply { isOpaque = false }
         refreshWorkspaceLayout()
         return workspaceContainer
@@ -261,6 +292,16 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         workspaceContainer.removeAll()
         inputColumn.parent?.remove(inputColumn)
         outputCard.parent?.remove(outputCard)
+        if (currentTool.id == "json") {
+            inputEditor.component.parent?.remove(inputEditor.component)
+            jsonWorkspace.add(inputEditor.component, BorderLayout.CENTER)
+            workspaceContainer.add(jsonWorkspace, BorderLayout.CENTER)
+            workspaceContainer.revalidate()
+            workspaceContainer.repaint()
+            return
+        }
+        jsonWorkspace.remove(inputEditor.component)
+        inputCard.add(inputEditor.component, BorderLayout.CENTER)
         val workspace = JBSplitter(isVerticalWorkspace(currentTool), 0.5f).apply {
             firstComponent = inputColumn
             secondComponent = outputCard
@@ -272,6 +313,21 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
 
     private fun isVerticalWorkspace(tool: ToolDefinition): Boolean =
         tool.id !in setOf("json", "code", "serialize", "diffs")
+
+    private fun buildJsonWorkspace(): JPanel {
+        val workspace = JPanel(BorderLayout(0, 6)).apply {
+            isOpaque = false
+            border = JBUI.Borders.empty(0, 2)
+        }
+        jsonFilterField.emptyText.text = "JavaScript 过滤，例如 .filter(x => x.active).map(x => x.name)"
+        jsonFilterField.toolTipText = "使用 JavaScript 风格表达式过滤 JSON"
+        jsonFilterField.addActionListener { runJsonAction("过滤") }
+        val filterBar = JPanel(BorderLayout(6, 0)).apply { isOpaque = false }
+        filterBar.add(jsonFilterField, BorderLayout.CENTER)
+        filterBar.add(iconButton("ƒ", "执行过滤并复制") { runJsonAction("过滤") }, BorderLayout.EAST)
+        workspace.add(filterBar, BorderLayout.SOUTH)
+        return workspace
+    }
 
     private fun buildInputCard(): JComponent {
         val card = cardPanel()
@@ -325,7 +381,14 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         editor.component.border = BorderFactory.createLineBorder(borderColor)
         document.addDocumentListener(object : DocumentAdapter() {
             override fun documentChanged(event: EditorDocumentEvent) {
-                SwingUtilities.invokeLater { updateJsonFolding(editor) }
+                SwingUtilities.invokeLater {
+                    updateJsonFolding(editor)
+                    if (!updatingJsonEditor && currentTool.id == "json" &&
+                        ::inputEditor.isInitialized && editor === inputEditor && event.newLength > 1
+                    ) {
+                        autoFormatJsonInput()
+                    }
+                }
             }
         }, this)
         return editor
@@ -338,6 +401,25 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
             editor.document.setText(text)
         }
         editor.caretModel.moveToOffset(0)
+    }
+
+    private fun setJsonEditorText(text: String) {
+        updatingJsonEditor = true
+        try {
+            setEditorText(inputEditor, text)
+        } finally {
+            updatingJsonEditor = false
+        }
+    }
+
+    private fun autoFormatJsonInput() {
+        if (currentTool.id != "json" || updatingJsonEditor) return
+        val input = editorText(inputEditor)
+        val result = ToolImplementations.normalizeJsonInput(input)
+        if (!result.isError && result.text.isNotBlank() && result.text != input) {
+            setJsonEditorText(result.text)
+            setStatus("已自动转换并格式化")
+        }
     }
 
     private fun updateEditorHighlighters() {
@@ -495,12 +577,14 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         setEditorText(diffEditor, "")
         setEditorText(outputEditor, "")
         diffCard.isVisible = tool.id == "diffs"
+        jsonFilterField.text = ""
         refreshWorkspaceLayout()
         imageLabel.icon = null
         currentResult = ToolResult()
         selectedFile = null
         updateFavoriteButton()
         updateToolSelector()
+        updateToolHeader()
         updateEditorHighlighters()
         setStatus(if (tool.network) "此工具需要网络" else "准备就绪")
         revalidate()
@@ -534,7 +618,23 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         updateEditorHighlighters()
     }
 
+    private fun updateToolHeader() {
+        val isJson = currentTool.id == "json"
+        modeLabel.isVisible = !isJson
+        operationBox.isVisible = !isJson
+        executeButton.isVisible = !isJson
+        genericCopyButton.isVisible = !isJson
+        genericClearButton.isVisible = !isJson
+        jsonActionsPanel.isVisible = isJson
+        toolHeader.revalidate()
+        toolHeader.repaint()
+    }
+
     private fun execute() {
+        if (currentTool.id == "json") {
+            runJsonAction("格式化")
+            return
+        }
         val operation = selectedOperation
         val tool = currentTool
         val secondaryInput = if (tool.id == "diffs") editorText(diffEditor) else ""
@@ -551,6 +651,22 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         }
     }
 
+    private fun runJsonAction(operation: String) {
+        val result = ToolImplementations.jsonEditorAction(
+            operation,
+            editorText(inputEditor),
+            jsonFilterField.text,
+        )
+        currentResult = result
+        if (result.isError) {
+            setStatus("JSON 操作失败：${result.text}", true)
+            return
+        }
+        setJsonEditorText(result.text)
+        copyText(result.text)
+        setStatus("已执行并复制")
+    }
+
     private fun showResult(result: ToolResult) {
         currentResult = result
         setEditorText(outputEditor, result.text)
@@ -560,18 +676,24 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     }
 
     private fun copyResult() {
-        if (currentResult.text.isBlank()) {
+        val text = if (currentTool.id == "json") editorText(inputEditor) else currentResult.text
+        if (text.isBlank()) {
             setStatus("没有可复制的文本结果", true)
             return
         }
-        CopyPasteManager.getInstance().setContents(StringSelection(currentResult.text))
+        copyText(text)
         setStatus("结果已复制")
+    }
+
+    private fun copyText(text: String) {
+        CopyPasteManager.getInstance().setContents(StringSelection(text))
     }
 
     private fun clearWorkspace() {
         setEditorText(inputEditor, "")
         setEditorText(diffEditor, "")
         setEditorText(outputEditor, "")
+        jsonFilterField.text = ""
         imageLabel.icon = null
         currentResult = ToolResult()
         setStatus("工作区已清空")

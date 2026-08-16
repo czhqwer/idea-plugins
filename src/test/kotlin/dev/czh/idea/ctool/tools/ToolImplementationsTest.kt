@@ -31,6 +31,33 @@ class ToolImplementationsTest {
     }
 
     @Test
+    fun jsonEditorFormatsCommonInputsAndFilters() {
+        val params = ToolImplementations.normalizeJsonInput("name=Ada&age=36")
+        assertFalse(params.isError)
+        assertTrue(params.text.contains("\"name\": \"Ada\""))
+        assertTrue(params.text.contains("\"age\": 36"))
+
+        val xml = ToolImplementations.normalizeJsonInput("<user><name>Ada</name></user>")
+        assertFalse(xml.isError)
+        assertTrue(xml.text.contains("\"user\""))
+        assertTrue(xml.text.contains("\"name\": \"Ada\""))
+
+        val yaml = ToolImplementations.normalizeJsonInput("name: Ada\nage: 36")
+        assertFalse(yaml.isError)
+        assertTrue(yaml.text.contains("\"age\": 36"))
+
+        val filtered = ToolImplementations.jsonEditorAction(
+            "过滤",
+            "[{\"name\":\"Ada\",\"active\":true},{\"name\":\"Grace\",\"active\":false}]",
+            ".filter(x => x.active).map(x => x.name)",
+        )
+        assertFalse(filtered.isError)
+        assertEquals("[\n  \"Ada\"\n]", filtered.text)
+        assertTrue(ToolImplementations.jsonEditorAction("JSON 转 XML", "{\"name\":\"Ada\"}").text.contains("<name>Ada</name>"))
+        assertTrue(ToolImplementations.jsonEditorAction("JSON 转 TypeScript", "{\"name\":\"Ada\"}").text.contains("interface Root"))
+    }
+
+    @Test
     fun conversionsAndValidation() {
         assertEquals("1000", run("unit", "长度", "1 km m").text)
         assertEquals("192.168.1.0", run("ipcalc", "IPv4", "192.168.1.10/24").text.substringAfter("网络地址: ").substringBefore('\n'))
