@@ -60,6 +60,9 @@ class ToolImplementationsTest {
     @Test
     fun conversionsAndValidation() {
         assertEquals("1000", run("unit", "长度", "1 km m").text)
+        assertEquals("1101111", run("radix", "2进制", "111").text)
+        assertEquals("157", run("radix", "8进制", "111").text)
+        assertEquals("6f", run("radix", "16进制", "111").text)
         assertEquals("192.168.1.0", run("ipcalc", "IPv4", "192.168.1.10/24").text.substringAfter("网络地址: ").substringBefore('\n'))
         assertEquals("select 1", run("sqlFillParameter", "填充 MyBatis SQL", "select ?", "1").text)
         assertEquals("一百二十三", run("zhNumber", "数字转小写", "123").text)

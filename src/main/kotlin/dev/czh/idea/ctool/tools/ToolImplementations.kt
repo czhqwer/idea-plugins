@@ -659,7 +659,12 @@ object ToolImplementations {
     private fun radix(request: ToolRequest): ToolResult {
         val parts = request.secondaryInput.split(Regex("[,;\\s]+"), limit = 0).filter(String::isNotBlank)
         val from = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(2, 64) ?: 10
-        val to = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(2, 64) ?: 16
+        val to = when (request.operation) {
+            "2进制" -> 2
+            "8进制" -> 8
+            "16进制" -> 16
+            else -> parts.getOrNull(1)?.toIntOrNull()?.coerceIn(2, 64) ?: 16
+        }
         val value = BigInteger(request.input.trim(), from)
         return ToolResult(value.toString(to))
     }

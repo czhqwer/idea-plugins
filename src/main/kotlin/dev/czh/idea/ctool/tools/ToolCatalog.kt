@@ -23,7 +23,7 @@ object ToolCatalog {
         add(tool("ip", "IP 地址查询", "其他", listOf("查询"), "ip 地址", network = true))
         add(tool("code", "代码格式化", "转换", listOf("JSON", "JavaScript", "TypeScript", "HTML", "CSS", "Less", "SCSS", "XML", "YAML", "SQL", "GraphQL", "Markdown", "Vue", "Angular", "PHP", "JSON5", "压缩"), "format prettier js ts html css less scss xml yaml sql graphql markdown vue angular php json5"))
         add(tool("unicode", "Unicode", "编码解码", listOf("编码", "解码", "Emoji", "HTML 实体", "CSS 实体"), "unicode emoji"))
-        add(tool("radix", "进制转换", "转换", listOf("2-64 进制"), "进制 binary hex radix"))
+        add(tool("radix", "进制转换", "转换", listOf("2进制", "8进制", "16进制"), "进制 binary octal hex radix"))
         add(tool("regex", "正则表达式", "校验", listOf("匹配", "查找", "替换"), "regex regexp"))
         add(tool("randomString", "随机字符", "生成", listOf("生成"), "random password"))
         add(tool("serialize", "序列化转换", "转换", listOf("JSON", "XML", "YAML", "CSV", "HTML Table", "PHP Array", "PHP Serialize", "Properties"), "serialize csv table php"))
