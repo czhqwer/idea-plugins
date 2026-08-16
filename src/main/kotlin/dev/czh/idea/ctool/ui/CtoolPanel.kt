@@ -44,8 +44,6 @@ import javax.swing.JPanel
 import javax.swing.JSeparator
 import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
-import javax.swing.event.DocumentEvent
-import javax.swing.event.DocumentListener
 import com.intellij.openapi.Disposable
 
 private class WrapLayout(
@@ -100,7 +98,6 @@ private class WrapLayout(
 class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
     private val borderColor = JBColor(Color(0xD9DEE7), Color(0x454B55))
     private val accentColor = JBColor(Color(0x2563EB), Color(0x5794FF))
-    private val searchField = JBTextField()
     private val categoryBar = JPanel(WrapLayout(FlowLayout.LEFT, 3, 0))
     private val toolBox = JComboBox<String>()
     private val modeLabel = JBLabel("模式")
@@ -136,26 +133,21 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     init {
         background = UIUtil.getPanelBackground()
         border = JBUI.Borders.empty(6)
+        minimumSize = Dimension(440, 360)
         buildHeader()
         buildBody()
-        installSearch()
         installShortcuts()
         refreshToolList()
         selectTool(currentTool)
     }
 
     private fun buildHeader() {
-        val top = JPanel(BorderLayout(8, 0)).apply { isOpaque = false }
         categoryBar.isOpaque = false
         buildCategoryButtons()
         installWrapReflow(categoryBar)
-        top.add(categoryBar, BorderLayout.CENTER)
-        searchField.emptyText.text = "搜索工具、功能或关键词"
-        searchField.preferredSize = Dimension(230, 28)
-        top.add(searchField, BorderLayout.EAST)
 
         val header = JPanel(BorderLayout(0, 3)).apply { isOpaque = false }
-        header.add(top, BorderLayout.NORTH)
+        header.add(categoryBar, BorderLayout.NORTH)
         header.add(JSeparator(), BorderLayout.SOUTH)
         add(header, BorderLayout.NORTH)
     }
@@ -206,6 +198,14 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         main.add(buildToolHeader(), BorderLayout.NORTH)
         main.add(buildWorkspace(), BorderLayout.CENTER)
         add(main, BorderLayout.CENTER)
+
+        val footer = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = JBUI.Borders.emptyTop(3)
+        }
+        statusLabel.foreground = UIUtil.getContextHelpForeground()
+        footer.add(statusLabel, BorderLayout.EAST)
+        add(footer, BorderLayout.SOUTH)
     }
 
     private fun buildToolHeader(): JComponent {
@@ -263,8 +263,6 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
 
         networkLabel.foreground = JBColor(Color(0xA16207), Color(0xE9B949))
         actionBar.add(networkLabel)
-        statusLabel.foreground = UIUtil.getContextHelpForeground()
-        actionBar.add(statusLabel)
         favoriteButton.preferredSize = Dimension(32, 28)
         favoriteButton.margin = JBUI.insets(3)
         favoriteButton.addActionListener { toggleFavorite() }
@@ -515,15 +513,6 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         addActionListener { action() }
     }
 
-    private fun installSearch() {
-        val listener = object : DocumentListener {
-            override fun insertUpdate(e: DocumentEvent) = refreshToolList()
-            override fun removeUpdate(e: DocumentEvent) = refreshToolList()
-            override fun changedUpdate(e: DocumentEvent) = refreshToolList()
-        }
-        searchField.document.addDocumentListener(listener)
-    }
-
     private fun installShortcuts() {
         val action = object : javax.swing.AbstractAction() {
             override fun actionPerformed(event: ActionEvent?) = execute()
@@ -536,15 +525,11 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     }
 
     private fun refreshToolList() {
-        val query = searchField.text.trim().lowercase()
         allVisibleTools = ToolCatalog.all.filter { tool ->
-            val categoryMatch = when (activeCategory) {
+            when (activeCategory) {
                 "常用" -> tool.id in devDockSettings.favoriteToolIds
                 else -> tool.category == activeCategory
             }
-            val haystack = listOf(tool.id, tool.name, tool.category, *tool.keywords.toTypedArray(), *tool.operations.toTypedArray())
-                .joinToString(" ").lowercase()
-            categoryMatch && (query.isBlank() || haystack.contains(query))
         }
         updatingToolBox = true
         try {
@@ -662,7 +647,6 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
             setStatus("JSON 操作失败：${result.text}", true)
             return
         }
-        setJsonEditorText(result.text)
         copyText(result.text)
         setStatus("已执行并复制")
     }
