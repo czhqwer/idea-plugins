@@ -28,6 +28,8 @@ import java.awt.Color
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.Graphics
+import java.awt.Graphics2D
 import java.awt.Insets
 import java.awt.event.ActionEvent
 import java.awt.event.ComponentAdapter
@@ -45,12 +47,46 @@ import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
 import com.intellij.openapi.Disposable
 
+private class FlatIconButton(text: String) : JButton(text) {
+    var primary = false
+
+    init {
+        isFocusable = false
+        isBorderPainted = false
+        isContentAreaFilled = false
+        isOpaque = false
+        isRolloverEnabled = true
+        isFocusPainted = false
+        border = JBUI.Borders.empty(4, 6)
+        margin = Insets(0, 0, 0, 0)
+        preferredSize = Dimension(30, 28)
+        font = font.deriveFont(Font.PLAIN, 13f)
+    }
+
+    override fun paintComponent(graphics: Graphics) {
+        val graphics2D = graphics.create() as Graphics2D
+        val pressed = model.isPressed || model.isArmed
+        val hovered = model.isRollover
+        if (primary || pressed || hovered) {
+            graphics2D.color = when {
+                primary && pressed -> JBColor(Color(0x1D4ED8), Color(0x3D74C5))
+                primary -> JBColor(Color(0x2563EB), Color(0x5794FF))
+                pressed -> JBColor(Color(0xD7E3F7), Color(0x38577F))
+                else -> JBColor(Color(0xEEF4FF), Color(0x2B3A50))
+            }
+            graphics2D.fillRoundRect(0, 0, width - 1, height - 1, 8, 8)
+        }
+        graphics2D.dispose()
+        super.paintComponent(graphics)
+    }
+}
+
 class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
     private val borderColor = JBColor(Color(0xD9DEE7), Color(0x454B55))
     private val accentColor = JBColor(Color(0x2563EB), Color(0x5794FF))
     private val categoryBar = JPanel(BorderLayout(3, 0))
     private val categoryButtons = JPanel()
-    private val categoryOverflowButton = JButton("☰")
+    private val categoryOverflowButton = FlatIconButton("☰")
     private var categories: List<String> = emptyList()
     private var updatingCategoryOverflow = false
     private val toolBox = JComboBox<String>()
@@ -77,8 +113,8 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
     private val imageLabel = JBLabel()
     private val networkLabel = JBLabel()
     private val statusLabel = JBLabel("准备就绪")
-    private val favoriteButton = JButton("☆")
-    private val executeButton = JButton("▶")
+    private val favoriteButton = FlatIconButton("☆")
+    private val executeButton = FlatIconButton("▶")
     private var selectedFile: Path? = null
     private var activeCategory = "常用"
     private var currentTool: ToolDefinition = ToolCatalog.find(devDockSettings.lastToolId)
@@ -255,11 +291,8 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         val actionBar = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply { isOpaque = false }
         toolActionBar = actionBar
         executeButton.isFocusable = false
-        executeButton.background = accentColor
+        executeButton.primary = true
         executeButton.foreground = Color.WHITE
-        executeButton.isOpaque = true
-        executeButton.border = JBUI.Borders.empty(5, 9)
-        executeButton.margin = JBUI.insets(3, 7)
         executeButton.toolTipText = "运行（Ctrl+Enter）"
         executeButton.addActionListener { execute() }
         genericCopyButton = iconButton("⧉", "复制结果") { copyResult() }
@@ -552,10 +585,7 @@ class DevDockPanel(private val project: Project) : JPanel(BorderLayout()), Dispo
         return header
     }
 
-    private fun iconButton(icon: String, tooltip: String, action: () -> Unit): JButton = JButton(icon).apply {
-        isFocusable = false
-        preferredSize = Dimension(32, 28)
-        margin = JBUI.insets(3)
+    private fun iconButton(icon: String, tooltip: String, action: () -> Unit): JButton = FlatIconButton(icon).apply {
         toolTipText = tooltip
         addActionListener { action() }
     }
